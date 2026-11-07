@@ -54,6 +54,14 @@ class PublishTest(unittest.TestCase):
         with self.assertRaises(ValueError): pub.publish(self.candidate,"example","description",self.readme)
         self.assertFalse((self.root/"releases/example/0.1.0").exists())
         self.assertFalse((pub.SITE/"config/pp.toml").exists())
+    def test_latest_release_is_default_and_old_images_remain_immutable(self):
+        for version in ['0.1.2', '0.1.10', '0.1.1']:
+            self.manifest['version']=version
+            (self.candidate/'manifest.json').write_text(json.dumps(self.manifest))
+            pub.publish(self.candidate,'example','description',self.readme)
+        config=tomllib.loads((pub.SITE/'config/pp.toml').read_text())
+        self.assertEqual(config['supported_apps'],['Example · 0.1.10','Example · 0.1.2','Example · 0.1.1'])
+        self.assertTrue((self.root/'releases/example/0.1.2/app.bin').is_file())
     def test_nvs_offset_rejected(self):
         self.manifest["flash_files"][0]["offset"]="0x9000"
         (self.candidate/"manifest.json").write_text(json.dumps(self.manifest))

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4ef">
+  <meta name="description" content="AI Passport 独立语音入口的交互原型：模拟按键、对话、任务与异常恢复。">
+  <title>PP · 交互实验室</title>
+  <link rel="stylesheet" href="./core/device.css">
+  <link rel="stylesheet" href="./demo.css">
+  <script type="module" src="./boot.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="wordmark" href="../"><span class="brand-mark">P<span>P</span></span><span>AI Passport <small>交互实验室</small></span></a>
+    <span class="prototype-label"><span></span>功能讨论稿 · 非真实设备</span>
+  </header>
+  <main>
+    <noscript>请启用 JavaScript 后体验模拟按键。本页不会访问真实设备。</noscript>
+    <div class="intro"><div><p class="eyebrow">PERSONAL AGENT × AI PASSPORT</p><h1>按住说，松开交给嘟嘟。</h1><p class="intro-copy">先把每一步交互做好，再让它发生在掌心。</p></div><span class="revision">INTERACTION STUDY <b>01</b></span></div>
+    <div class="workspace">
+      <section class="device-lab" aria-label="PP 模拟设备">
+        <div class="stage-caption"><span class="small-dot"></span>240 × 320 <span class="caption-separator">/</span> 半双工语音</div>
+        <div class="device-stage" id="device-host"></div>
+        <div class="stage-bottom"><span class="status-indicator"><i id="stage-dot"></i><span id="stage-status" aria-live="polite">就绪，等你开口</span></span><span>PC · 鼠标或键盘操作</span></div>
+      </section>
+      <aside class="control-panel">
+        <section class="panel-section">
+          <div class="section-heading"><span class="section-index">01</span><h2>选一个场景，试着按下 OK</h2></div>
+          <div class="scenarios" role="group" aria-label="体验场景"></div>
+          <div class="utterance"><span>这次模拟说</span><p id="utterance">今天适合出去散步吗？</p></div>
+        </section>
+        <section class="panel-section keys-section">
+          <div class="section-heading"><span class="section-index">02</span><h2>三个按键，保持简单</h2></div>
+          <dl class="key-guide"><div><dt>按住 OK</dt><dd>说话，松开立即停止收音</dd></div><div><dt>短按 OK</dt><dd>播放时立即停播；平时打开菜单</dd></div><div><dt>双击 OK</dt><dd>切换引导 / 排队，记住你的选择</dd></div><div><dt>上 / 下</dt><dd>翻阅全文，或选择菜单项</dd></div></dl>
+          <div class="mode-note" id="mode-note"><span class="mode-icon">↳</span><span><strong>当前：直接引导</strong><small>执行中再说话，会补充或调整当前执行。</small></span></div>
+        </section>
+        <section class="panel-section fault-section">
+          <div class="section-heading"><span class="section-index">03</span><h2>出问题，也要知道下一步</h2></div>
+          <div class="fault-actions"><button id="recognition-failure" aria-pressed="false">让下次识别失败</button><button id="network-toggle">模拟断网</button><button id="task-complete" disabled>模拟任务完成</button></div>
+          <p class="fault-note" id="fault-note">失败的录音不会提交；恢复后可以重新按住说话。</p>
+        </section>
+        <details class="interaction-record"><summary>这次交互的过程<span id="event-count">0 步</span></summary><ol id="event-log"></ol></details>
+      </aside>
+    </div>
+    <footer class="page-footer"><span>交互模拟 · 不采集麦克风，不连接 PA 或语音服务，播报仅以动效表示。</span><span>硬件外观：FoloToy <a href="./FoloToy-LICENSE.txt">MIT</a></span></footer>
+  </main>
+</body>
+</html>

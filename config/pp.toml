@@ -1,6 +1,21 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.1.1"]
+description = "修复 TLS 握手内存不足；已通过 PP 真机连接、断线恢复和串口边界验证，语音体验待验收。"
+version = "0.1.1"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.1.1/firmware.zip"
+manifest = "/firmware/pa-terminal/0.1.1/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+readme.text = "/firmware/pa-terminal/0.1.1/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.1.1/bootloader.bin", "/firmware/pa-terminal/0.1.1/partition-table.bin", "/firmware/pa-terminal/0.1.1/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2011792]
+image.esp32-c3.sha256 = ["a438029e78cfed7aa08a395cf6b6a5d35f0ebcda8f2a10421c9c50b69acca44d", "420931e3f5af072d899b5357c043fd9f283bf165fc9df6113b6d43d82b48a06d", "274478b632ec7742a92fa68666cc33e8f6a361f21ce15baef23eb32bb7ca66bc"]
 
 ["PA-Terminal · 0.1.0"]
 description = "PA 独立语音终端：中文、按键讲话、独立会话、任务结果。软件与构建通过，PP 真机待验收。"

@@ -68,6 +68,14 @@ def update_catalog():
     for path in sorted((ROOT / "releases").glob("*/*/manifest.json")):
         manifest = json.loads(path.read_text())
         entries.append((path.parent.relative_to(ROOT / "releases").as_posix(), manifest))
+    # Keep each application's newest release first, so a fix becomes the default
+    # without modifying the immutable files of previously published versions.
+    entries.sort(key=lambda item: (
+        item[0].split('/', 1)[0],
+        tuple(-int(part) for part in item[1]['version'].split('-', 1)[0].split('.')),
+        '-' in item[1]['version'],
+        item[1]['version'],
+    ))
     quote = lambda value: json.dumps(value, ensure_ascii=False)
     names = [f'{m["application"]} · {m["version"]}' for _, m in entries]
     text = 'esp_toml_version = 1.0\nfirmware_images_url = "/firmware/"\n'

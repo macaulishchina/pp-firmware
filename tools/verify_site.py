@@ -44,7 +44,7 @@ def http_checks():
     assert get('/certs/pp-firmware-ca.crt')[0]==(ROOT/'private/tls/ca.crt').read_bytes()
     return config['supported_apps']
 
-async def browser_checks():
+async def browser_checks(default_app):
     async with async_playwright() as p:
         browser=await p.chromium.launch(headless=True)
         ctx=await browser.new_context(ignore_https_errors=True,viewport={'width':1440,'height':1000},accept_downloads=True)
@@ -58,7 +58,7 @@ async def browser_checks():
         assert await page.get_by_role('button',name='连接设备',exact=True).count()==1
         await page.get_by_role('heading',name='配置与使用',exact=False).wait_for()
         assert await page.get_by_role('button',name='打开 USB 配置',exact=True).is_enabled()
-        assert await page.get_by_text('PA-Terminal · 0.1.0',exact=True).count()>0
+        assert await page.get_by_text(default_app,exact=True).count()>0
         assert await page.get_by_text('已发布 · 真机待验收',exact=True).count()==1
         assert await page.get_by_role('button',name='安装到 PP',exact=True).is_disabled()
         assert await page.evaluate('window.isSecureContext')
@@ -108,5 +108,5 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url',default=URL,help='Read-only site URL, including an isolated local preview')
     URL=parser.parse_args().url.rstrip('/')
-    http_checks()
-    print(json.dumps(asyncio.run(browser_checks()),ensure_ascii=False))
+    apps=http_checks()
+    print(json.dumps(asyncio.run(browser_checks(apps[0])),ensure_ascii=False))

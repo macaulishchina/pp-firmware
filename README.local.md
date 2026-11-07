@@ -1,13 +1,16 @@
 # PP 固件中心（Dell 本地部署）
 
 外网入口：**https://47.109.34.254:9443/**（FRP TCP 转发）。局域网入口：**https://110.0.0.82:9443/**。这是本地自用的静态固件展示、选择、下载和 USB 安装网站。
-已上架 PA-Terminal 0.1.0、PPDemo 0.2.0 英文版和 PPDemo-Zh 0.2.0 中文版，均标记“真机待验收”。没有管理员上传后台、在线编译或 OTA。
+已上架 PA-Terminal 0.1.1 及历史版本、PPDemo 0.2.0 英文版和 PPDemo-Zh 0.2.0 中文版。
+0.1.1 修复 TLS 握手内存不足，已通过 PP 真机连接、三次入口重启后的重连和串口边界验证，
+完整语音与长期体验仍待验收；同应用的新版本优先展示。没有管理员上传后台、在线编译或 OTA。
 固件站本身不运行 Agent；PA-Terminal 通过本站的两条设备专用 HTTPS 路由连接 PA。
 网站部署或添加固件不重启 PA。
 
 基于 ESP Launchpad 上游提交 `804b308c28fe3e136e9c2b850c8534da374fa9e8`，保留 Apache-2.0
 许可证。底层串口、esptool 连接及刷写复用上游，当前依赖版本由 package-lock.json 固定。
-仓库上游仅作来源，尚未配置个人远程仓库；本轮不向官方仓库推送。
+项目仓库：`git@github.com:macaulishchina/pp-firmware.git`（`origin`）。
+`upstream` 保留 ESP Launchpad 官方仓库作为来源；项目修改推送至个人仓库。
 
 ## 目录和唯一配置来源
 
@@ -42,6 +45,25 @@ docker compose -p pp-firmware -f deploy/compose.yaml up -d
 导航只切换页面；串口连接期间禁用配置跳转，取消选择后恢复。安装成功后保留在目录，
 从“打开 USB 配置”继续；跳转先释放当前串口，避免刷写页和配置页争用设备。
 PPDemo 系列直接在设备使用，USB 配网与配对用于 PA-Terminal。
+
+## PP 交互演示
+
+独立页面：`/pp-demo/`，源码位于 `public/pp-demo/`。固定维护为可复用的 PC 演示底座，
+不做移动端适配；开发约定见 [PP 演示底座](docs/pp-demo-framework.md)。用于确认屏幕布局、按键、
+引导／排队、短播报／长文本、澄清、任务消息和异常恢复体验，全部为浏览器模拟。
+不申请麦克风或串口、不连接 PA、不发起模型或语音调用；音量与播报仅模拟呈现。
+只在浏览器保存演示用的输入模式、音量和保持在线偏好，不保存对话或凭据。
+硬件外观图来自 FoloToy AI Passport，随页保留 MIT 许可。
+
+验证：
+
+```sh
+node --test tests/passport-demo.test.mjs
+/home/macaulish/workspace/dell-voice-assistant/.venv/bin/python tests/verify_passport_demo.py
+```
+
+标准前端构建会复制该静态目录。仅更新演示时，可只复制 `public/pp-demo/` 至
+`dist/pp-demo/`，不需要构建主站、重启网站或 PA，也不更换设备固件。
 
 ## Windows 信任本地 CA
 
@@ -91,7 +113,7 @@ python3 tools/publish.py \
 只向已连接设备写入，不上传网站或存储到 localStorage。需要可信 HTTPS 与 Chrome／Edge。
 配对材料由 PA 配置后台生成，网站不能生成 PA 管理员授权。恢复出厂单独确认；服务器配对还需撤销。
 
-PA-Terminal 候选位于 `../candidates/pa-terminal/0.1.0/<应用 SHA256>/`，当前真机待验收。
+PA-Terminal 候选位于 `../candidates/pa-terminal/<版本>/<应用 SHA256>/`。
 2026-11-07 已授权部署：PA 0.4.34、USB 配置页、固件目录与设备代理均已生效。
 外网 HTTPS 配对、WSS hello、撤销后拒绝连接及浏览器下载校验通过；未自动刷写真机。
 代理目标为 Docker 网关 `192.168.32.1:8047`，PA 仅信任本站容器 `192.168.32.2/32`；
@@ -111,10 +133,10 @@ USB 模拟浏览器验收命令：
 
 ```sh
 python3 tools/publish.py \
-  ../candidates/pa-terminal/0.1.0/678c399f572a37fd5706ab8ea888e6139cba7b6b6548720338ab6948fa4113b1 \
+  ../candidates/pa-terminal/0.1.1/274478b632ec7742a92fa68666cc33e8f6a361f21ce15baef23eb32bb7ca66bc \
   --id pa-terminal \
-  --description 'PA 独立语音终端：中文、按键讲话、独立会话、任务结果。软件与构建通过，PP 真机待验收。' \
-  --readme config/readmes/pa-terminal.md
+  --description '修复 TLS 握手内存不足；已通过 PP 真机连接、断线恢复和串口边界验证，语音体验待验收。' \
+  --readme config/readmes/pa-terminal-0.1.1.md
 ```
 
 ### 固件站原有能力
