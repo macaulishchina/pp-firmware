@@ -1,13 +1,13 @@
 import { defineConfig } from "./src/app-config";
 
 export default defineConfig({
-  title: "ESP Launchpad",
-  projectName: "espressif",
-  storagePrefix: "espdashboard",
+  title: "PP 固件中心",
+  projectName: "pp-firmware",
+  storagePrefix: "pp-firmware",
   defaults: {
     sidebarCollapsed: false,
     darkMode: false,
-    language: "en",
+    language: "zh",
   },
   logo: {
     minimal: {

@@ -1,0 +1,48 @@
+esp_toml_version = 1.0
+firmware_images_url = "/firmware/"
+supported_apps = ["PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.1.0"]
+description = "PA 独立语音终端：中文、按键讲话、独立会话、任务结果。软件与构建通过，PP 真机待验收。"
+version = "0.1.0"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.1.0/firmware.zip"
+manifest = "/firmware/pa-terminal/0.1.0/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+readme.text = "/firmware/pa-terminal/0.1.0/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.1.0/bootloader.bin", "/firmware/pa-terminal/0.1.0/partition-table.bin", "/firmware/pa-terminal/0.1.0/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2008800]
+image.esp32-c3.sha256 = ["a438029e78cfed7aa08a395cf6b6a5d35f0ebcda8f2a10421c9c50b69acca44d", "420931e3f5af072d899b5357c043fd9f283bf165fc9df6113b6d43d82b48a06d", "678c399f572a37fd5706ab8ea888e6139cba7b6b6548720338ab6948fa4113b1"]
+
+["PPDemo · 0.2.0"]
+description = "PP 独立硬件体验与质检：屏幕、按键、录放音、电池、Wi-Fi、蓝牙、存储及休眠唤醒。已通过编译与镜像校验，真机待验收。"
+version = "0.2.0"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/ppdemo/0.2.0/firmware.zip"
+manifest = "/firmware/ppdemo/0.2.0/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+readme.text = "/firmware/ppdemo/0.2.0/README.md"
+image.esp32-c3.parts = ["/firmware/ppdemo/0.2.0/bootloader.bin", "/firmware/ppdemo/0.2.0/partition-table.bin", "/firmware/ppdemo/0.2.0/ppdemo.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 1593312]
+image.esp32-c3.sha256 = ["242bb29be4c0ae27f717b78176b662f9e2cffdebae459fcf0fc8e0b63eceec54", "420931e3f5af072d899b5357c043fd9f283bf165fc9df6113b6d43d82b48a06d", "8f8bd2048798958a81ebe12317b9404dae726d522d846e1c89f384f5deae1ba1"]
+
+["PPDemo-Zh · 0.2.0"]
+description = "PPDemo 中文版：中文菜单、状态提示、人工评价和 Wi-Fi 配网页，内置中文字库。屏幕、按键、录放音、电池、无线、存储与休眠功能与英文版共用实现；真机待验收。"
+version = "0.2.0"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/ppdemo-zh/0.2.0/firmware.zip"
+manifest = "/firmware/ppdemo-zh/0.2.0/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+readme.text = "/firmware/ppdemo-zh/0.2.0/README.md"
+image.esp32-c3.parts = ["/firmware/ppdemo-zh/0.2.0/bootloader.bin", "/firmware/ppdemo-zh/0.2.0/partition-table.bin", "/firmware/ppdemo-zh/0.2.0/ppdemo.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 1696384]
+image.esp32-c3.sha256 = ["bc7b8b882ec16c69e8e0ec1057b72b87b2778dbabc157f850e76ab01bc0a57c8", "420931e3f5af072d899b5357c043fd9f283bf165fc9df6113b6d43d82b48a06d", "881e5ddf50be734828a23f65225301ebd94e1bae64989e0b1871e0ad5752b8c5"]

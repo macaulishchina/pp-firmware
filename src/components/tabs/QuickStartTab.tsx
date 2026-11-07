@@ -1,438 +1,111 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Alert,
-  Button,
-  RadioGroup,
-  Select,
-  SectionCard,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Separator,
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SimpleCard,
-  Badge,
-  Tabs,
-  TabsList,
-  TabsTrigger,
+  Alert, Button, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@espressif/dashboard-ui-components";
-import { ConnectionStatus, useEsp } from "../../esp/EspContext";
-import { Box, Cpu, Zap } from 'lucide-react'
-import {
-  getApp,
-  loadLaunchpadConfig,
-  type AppConfig,
-  type LaunchpadConfig,
-} from "../../lib/tomlConfig";
-import { fetchMarkdownAsHtml } from "../../lib/markdown";
-import { QrImage } from "../QrImage";
+import { Download, FileCheck2, Usb, ShieldCheck } from "lucide-react";
+import { useEsp } from "../../esp/EspContext";
+import { getApp, loadLaunchpadConfig, type LaunchpadConfig } from "../../lib/tomlConfig";
+import { resolvePublishedParts } from "../../lib/publishedFirmware";
 import type { AppFlashLinks } from "../modals/FlashStatusDialog";
-import gplayBadge from "../../../assets/gplay_download.png";
-import appstoreBadge from "../../../assets/appstore_download.png";
 
-function appLinksFromConfig(app: AppConfig): AppFlashLinks {
-  return {
-    androidUrl: app.android_app_url,
-    iosUrl: app.ios_app_url,
-    setupPayload: app.setup_payload,
-    setupPayloadLogo: app.setup_payload_logo,
-  };
-}
-
-function normalizeChipName(chipName: string): string {
-  return chipName.replace(/-/g, "").toLowerCase();
-}
-
-function findMatchingChipset(
-  chipsets: string[] | undefined,
-  chipName: string,
-): string | undefined {
-  if (!chipsets || chipName === "default") return undefined;
-  const normalized = normalizeChipName(chipName);
-  return chipsets.find((c) => normalizeChipName(c) === normalized);
-}
-
-type AppSolution = "rainmaker" | "matter";
-
-function getSelectedSolution(): AppSolution | "" {
-  const params = new URLSearchParams(window.location.search);
-  const solution = params.get("solution")?.toLowerCase();
-  if (solution === "rainmaker" || solution === "matter") return solution;
-  return params.has("flashConfigURL") ? "" : "rainmaker";
-}
-
-export function QuickStartTab({
-  goToConsole,
-  onFlashStatus,
-}: {
+export function QuickStartTab({goToConsole, onFlashStatus}: {
   goToConsole: () => void;
   onFlashStatus: (links: AppFlashLinks) => void;
 }) {
-  const { connected, chipDesc, chipName, busy, downloadAndFlash, setConsoleBaudrateOverride } =
-    useEsp();
-  const deviceReady = connected && chipDesc !== "default";
-
+  const esp = useEsp();
   const [config, setConfig] = useState<LaunchpadConfig | null>(null);
-  const [isDefault, setIsDefault] = useState(true);
-  const [tomlFileURL, setTomlFileURL] = useState("");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [missingApp, setMissingApp] = useState<string | undefined>(undefined);
-
-  const [selectedApp, setSelectedApp] = useState("");
-  const [selectedChipset, setSelectedChipset] = useState("");
-  const [selectedDevKit, setSelectedDevKit] = useState("");
-
-  const [appReadmeHtml, setAppReadmeHtml] = useState("");
-  const [configReadmeHtml, setConfigReadmeHtml] = useState("");
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [flashError, setFlashError] = useState<string | null>(null);
-  const [postFlashLinks, setPostFlashLinks] = useState<AppFlashLinks | null>(null);
-  const configRequestRef = useRef(0);
-  const selectedSolution = getSelectedSolution();
-  const hasFlashConfigURL = new URLSearchParams(window.location.search).has("flashConfigURL");
-
-  const app = useMemo(
-    () => (config && selectedApp ? getApp(config, selectedApp) : undefined),
-    [config, selectedApp],
-  );
-
-  const devKits = useMemo<string[] | undefined>(
-    () => (app && selectedChipset ? app.developKits?.[selectedChipset.toLowerCase()] : undefined),
-    [app, selectedChipset],
-  );
-
-  const loadConfig = useCallback(async (search: string) => {
-    const requestId = ++configRequestRef.current;
-    setLoadError(null);
-    setConfig(null);
-    setConfigReadmeHtml("");
-
-    try {
-      const result = await loadLaunchpadConfig(search);
-      if (requestId !== configRequestRef.current) return;
-
+  const [selected, setSelected] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [flashError, setFlashError] = useState("");
+  const [confirm, setConfirm] = useState(false);
+  const [pending, setPending] = useState(false);
+  const submitting = useRef(false);
+  const app = config && selected ? getApp(config, selected) : undefined;
+  const matchedChip = app?.chipsets.find(chip => chip.replace(/-/g, "").toLowerCase() === esp.chipName.replace(/-/g, "").toLowerCase());
+  useEffect(() => {
+    let stopped = false;
+    loadLaunchpadConfig().then(result => {
+      if (stopped) return;
       setConfig(result.config);
-      setIsDefault(result.isDefault);
-      setTomlFileURL(result.tomlFileURL);
-      setMissingApp(result.missingApp);
-      setSelectedApp(result.config.supported_apps?.[0] ?? "");
-
-      if (result.config.config_readme_url) {
-        const html = await fetchMarkdownAsHtml(result.config.config_readme_url);
-        if (requestId === configRequestRef.current) setConfigReadmeHtml(html);
-      }
-    } catch (err) {
-      if (requestId === configRequestRef.current) {
-        setLoadError((err as Error).message);
-      }
-    }
+      setSelected(result.config.supported_apps?.[0] ?? "");
+    }).catch(error => { if (!stopped) setLoadError(String(error.message ?? error)); });
+    return () => { stopped = true; };
   }, []);
+  useEffect(() => { esp.setConsoleBaudrateOverride(app?.console_baudrate); }, [app, esp.setConsoleBaudrateOverride]);
 
-  // ── Initial config load ────────────────────────────────────────
-  useEffect(() => {
-    void loadConfig(window.location.search);
-    return () => {
-      configRequestRef.current += 1;
-    };
-  }, [loadConfig]);
-
-  // ── Derive per-app state when the selected app changes ──────────
-  useEffect(() => {
-    if (!app) return;
-    //setSelectedChipset(app.chipsets?.[0] ?? "");
-    setConsoleBaudrateOverride(app.console_baudrate);
-    setPostFlashLinks(null);
-
-    if (app.readme?.text) {
-      void fetchMarkdownAsHtml(app.readme.text).then(setAppReadmeHtml);
-    } else {
-      setAppReadmeHtml("");
+  async function install() {
+    if (!app || !matchedChip || !esp.connected || submitting.current) return;
+    submitting.current = true;
+    setPending(true); setConfirm(false); setFlashError("");
+    let written = false;
+    try {
+      const image = app.image[matchedChip.toLowerCase()];
+      const parts = resolvePublishedParts(image);
+      const result = await esp.downloadAndFlashParts(parts, {eraseAll: false});
+      if (!result.ok) throw new Error(result.error || "安装未完成，请查看串口日志。");
+      written = true;
+      goToConsole();
+      await esp.resetDevice();
+      onFlashStatus({});
+    } catch (error) {
+      setFlashError(`${written ? "镜像已经写入并校验，但重启未完成。请在串口日志页重启设备，无需重新刷写。 " : ""}${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      submitting.current = false; setPending(false);
     }
-  }, [app, setConsoleBaudrateOverride]);
-
-  // ── Default dev kit when the chipset changes ────────────────────
-  useEffect(() => {
-    setSelectedDevKit(devKits?.[0] ?? "");
-  }, [devKits]);
-
-  // ── Auto-select the detected chip when connected ────────────────
-  useEffect(() => {
-    if (!app || chipName === "default") {
-      if (chipName === "default") setSelectedChipset("");
-      return;
-    }
-    setSelectedChipset(findMatchingChipset(app.chipsets, chipName) ?? "");
-  }, [app, chipName]);
-
-  const handleAppChange = useCallback(
-    (newApp: string) => {
-      setSelectedApp(newApp);
-      if (config) {
-        const appConfig = getApp(config, newApp);
-        setSelectedChipset(findMatchingChipset(appConfig?.chipsets, chipName) ?? "");
-      }
-    }, [config, chipName]);
-
-  const handleSolutionChange = useCallback(
-    (solution: string) => {
-      if (
-        (solution !== "rainmaker" && solution !== "matter") ||
-        solution === selectedSolution
-      ) {
-        return;
-      }
-
-      const url = new URL(window.location.href);
-      url.searchParams.set("solution", solution);
-      url.searchParams.delete("flashConfigURL");
-      url.searchParams.delete("crossDomain");
-      url.searchParams.delete("app");
-      url.searchParams.delete("exact");
-      window.history.pushState({}, "", url.toString());
-      void loadConfig(url.search);
-    },
-    [loadConfig, selectedSolution],
-  );
-
-  const resolveFlashFile = useCallback((): string | undefined => {
-    if (!app) return undefined;
-    if (devKits && devKits.length > 0) {
-      return selectedDevKit ? app.image[selectedDevKit] : undefined;
-    }
-    return app.image[selectedChipset.toLowerCase()];
-  }, [app, devKits, selectedChipset, selectedDevKit]);
-
-  const onFlash = async () => {
-    if (!app || !config) return;
-    const flashFile = resolveFlashFile();
-    if (!flashFile) {
-      setFlashError("Please ensure that a chipset type is selected before flashing.");
-      setTimeout(() => setFlashError(null), 3000);
-      return;
-    }
-    setFlashError(null);
-    setPostFlashLinks(null);
-    goToConsole();
-    const offset = parseInt(app.offset ?? "0x0000");
-    const ok = await downloadAndFlash(config.firmware_images_url + flashFile, offset);
-    if (ok) {
-      const links = appLinksFromConfig(app);
-      onFlashStatus(links);
-      setPostFlashLinks(links);
-    }
-  };
-
-  if (loadError) {
-    return (
-      <Alert type="error" title="Failed to load configuration">
-        {loadError}
-      </Alert>
-    );
   }
-  if (!config || !app) {
-    return <p className="text-muted-foreground">Loading firmware configuration…</p>;
-  }
-  
-  return (
-    <div>
-    {deviceReady && (
-      <div className="space-y-1">
-        <ConnectionStatus />
-        <br /> <Separator /> <br />
-      </div>
-    )}
-    <div className="space-y-5">
-      <h5 className="text-base font-semibold">
-        {isDefault ? (<p>
-          Choose from some of ESP's pre-built, out-of-the-box examples to flash and play.
-          </p>
-        ) : (
-          <Alert type="warning" variant="soft">
-          <b>Note:</b> You have chosen to try the firmware images
-          from an <b>external source</b> — <span className="break-all">{tomlFileURL}</span>
-          </Alert>
-        )}
-      </h5>
-      {!hasFlashConfigURL && (
-        <nav aria-label="Application solution">
-          <Tabs value={selectedSolution} onValueChange={handleSolutionChange}>
-            <TabsList variant="line">
-              <TabsTrigger value="rainmaker">RainMaker Apps</TabsTrigger>
-              <TabsTrigger value="matter">Matter Apps</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </nav>
-      )}
-      <Separator />
-      {missingApp && (
-        <Alert type="warning" title="Application not found">
-          No applications found for {missingApp}
-        </Alert>
-      )}
-      <div className="flex items-center gap-4">
-      <SectionCard
-        icon={<Box className="h-5 w-5 text-muted-foreground" />}
-        primaryText="Select Application"
-        allowCollapse={false}
-        defaultOpen={true}
-        size="default"
-        variant="gradient"
-        color="secondary">
-  
-        <div className="space-y-1">
-          <Select value={selectedApp} onValueChange={handleAppChange}>
-            <SelectTrigger className="w-[250px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {config.supported_apps.map((name) => (
-                <SelectItem key={name} value={name}>
-                  {name}
-                </SelectItem>
-            ))}
-            </SelectContent>
+
+  if (loadError) return <Alert type="error" title="固件目录加载失败">{loadError}。请刷新页面重试。</Alert>;
+  if (!app || !config) return <p className="text-muted-foreground">正在读取固件目录…</p>;
+  const files = app.image[app.chipsets[0]?.toLowerCase()];
+  return <div className="space-y-6">
+    <header className="space-y-2">
+      <h1 className="text-2xl font-semibold tracking-tight">固件目录</h1>
+      <p className="text-sm text-muted-foreground">选择版本，查看说明，然后通过当前电脑的 USB 为 PP 安装固件。</p>
+    </header>
+    <section className="rounded-xl border border-border bg-card p-6 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-2">
+          <label htmlFor="firmware-select" className="text-xs font-medium text-muted-foreground">已发布固件</label>
+          <Select value={selected} onValueChange={name => {setSelected(name); setFlashError("");}} disabled={pending || esp.busy}>
+            <SelectTrigger id="firmware-select" className="min-w-[280px]" aria-label="选择固件"><SelectValue /></SelectTrigger>
+            <SelectContent>{config.supported_apps.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        
-        {appReadmeHtml && (
-            <Button variant="link" onClick={() => setSheetOpen(true)}>
-              Show Application Information
-            </Button>
-        )}
-        {app.description && (
-          <div className="space-y-1">
-            <label className="text-sm font-medium">Application Description</label>
-            <p className="text-sm text-muted-foreground">{app.description}</p>
-          </div>
-        )}
-      </SectionCard>
-
-      <div className="grid max-w-xl gap-4">
-      <SectionCard
-        icon={<Cpu className="h-5 w-5 text-muted-foreground" />}
-        primaryText="ESP Chipset Type"
-        allowCollapse={false}
-        defaultOpen={true}
-        size="default"
-        variant="gradient"
-        color="secondary">
-        {!selectedChipset && deviceReady && (
-          <div>
-            <Alert type="error" color="error" title="Unsupported chipset type" variant="gradient">Selected application is not supported on your connected device.
-            </Alert>
-            <br /> <br />
-          </div>
-        )}
-
-        <div className="space-y-1">
-          <label className="text-sm font-bold">Application Supported Chipset Types</label>
-          <br />
-          <Separator /> <br />
-          
-          <div className="flex flex-wrap items-center gap-2">
-            {app.chipsets.map((chipset) => (
-              <div key={chipset}>
-                {deviceReady && chipset === selectedChipset ? (
-                  <Badge
-                    className="justify-center text-center font-normal"
-                    color="secondary"
-                    variant="solid"
-                  >{chipset}</Badge>
-                ) : (
-                  <Badge
-                    className="justify-center text-center font-normal"
-                    variant="gradient"
-                  >{chipset}</Badge>
-                )}
-              </div>
-            ))}
-          </div>
-          <br />
-        </div>
-        <Separator />
-
-        
-      </SectionCard>
-
-        {devKits && devKits.length > 0 && (
-          <div className="space-y-1">
-            <label className="text-sm font-medium">ESP Develop Kits</label>
-            <RadioGroup
-              orientation="horizontal"
-              value={selectedDevKit}
-              onValueChange={setSelectedDevKit}
-              options={devKits.map((k) => ({ value: k, label: k }))}
-            />
-          </div>
-        )}
+        <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs text-amber-700">{app.acceptance === "verified" ? "真机已验收" : "已发布 · 真机待验收"}</span>
       </div>
-        
-
-        <div className="flex items-center gap-4">
-          <Button color="secondary" disabled={!deviceReady || busy || !selectedChipset} onClick={() => void onFlash()}>
-            <Zap className="h-5 w-5" aria-hidden /> Flash
-          </Button>
-          
-        </div>
-
-        {flashError && (
-          <Alert type="error" title="Unable to flash device">
-            {flashError}
-          </Alert>
-        )}
+      <p className="text-sm leading-7">{app.description}</p>
+      <dl className="grid grid-cols-2 md:grid-cols-4 gap-5 text-sm">
+        <div><dt className="text-xs text-muted-foreground mb-1">版本</dt><dd>{app.version}</dd></div>
+        <div><dt className="text-xs text-muted-foreground mb-1">目标设备</dt><dd>{app.board}</dd></div>
+        <div><dt className="text-xs text-muted-foreground mb-1">芯片</dt><dd>{app.chipsets.join(" / ")}</dd></div>
+        <div><dt className="text-xs text-muted-foreground mb-1">镜像</dt><dd>{files?.parts?.length ?? 0} 个 · SHA256 校验</dd></div>
+      </dl>
+      <div className="flex flex-wrap gap-3 border-t border-border pt-5">
+        {app.download && <a className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-muted" href={app.download} download><Download size={16}/>下载刷写包</a>}
+        {app.readme?.text && <a className="inline-flex items-center gap-2 px-3 py-2 text-sm underline underline-offset-4" href={app.readme.text} target="_blank" rel="noreferrer">操作说明</a>}
+        {app.manifest && <a className="inline-flex items-center gap-2 px-3 py-2 text-sm underline underline-offset-4" href={app.manifest} target="_blank" rel="noreferrer"><FileCheck2 size={16}/>镜像清单</a>}
       </div>
-
-      {configReadmeHtml && (
-        <SimpleCard title="Application Configuration">
-          <div className="markdown-body" dangerouslySetInnerHTML={{ __html: configReadmeHtml }} />
-        </SimpleCard>
-      )}
-
-      {postFlashLinks && (postFlashLinks.androidUrl || postFlashLinks.iosUrl || postFlashLinks.setupPayload) && (
-        <div className="flex flex-wrap items-start gap-8 pt-2">
-          {postFlashLinks.androidUrl && (
-            <div className="space-y-2">
-              <a href={postFlashLinks.androidUrl} target="_blank" rel="noreferrer">
-                <img src={gplayBadge} alt="Get it on Google Play" height={50} width={130} />
-              </a>
-              <QrImage text={postFlashLinks.androidUrl} alt="Android app QR code" />
-            </div>
-          )}
-          {postFlashLinks.iosUrl && (
-            <div className="space-y-2">
-              <a href={postFlashLinks.iosUrl} target="_blank" rel="noreferrer">
-                <img src={appstoreBadge} alt="Download on the App Store" height={50} width={130} />
-              </a>
-              <QrImage text={postFlashLinks.iosUrl} alt="iOS app QR code" />
-            </div>
-          )}
-          {postFlashLinks.setupPayload && (
-            <div className="space-y-2">
-              {postFlashLinks.setupPayloadLogo && (
-                <img src={postFlashLinks.setupPayloadLogo} alt="" height={50} width={130} />
-              )}
-              <QrImage text={postFlashLinks.setupPayload} alt="Device setup QR code" />
-            </div>
-          )}
+    </section>
+    <section className="rounded-xl border border-border p-6 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-2">
+          <h2 className="font-semibold">USB 安装</h2>
+          <p className="text-sm text-muted-foreground">{esp.connected ? `已连接：${esp.chipDesc}` : "请先连接设备。选择串口前不会下载或写入固件。"}</p>
         </div>
-      )}
-
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>Application Information</SheetTitle>
-          </SheetHeader>
-          <div
-            className="markdown-body p-4"
-            dangerouslySetInnerHTML={{ __html: appReadmeHtml }}
-          />
-        </SheetContent>
-      </Sheet>
-    </div>
-    </div>
-  );
+        <Button color="secondary" disabled={!esp.connected || !matchedChip || esp.busy || pending} onClick={() => setConfirm(true)}><Usb size={16}/>{pending ? "正在校验与安装…" : "安装到 PP"}</Button>
+      </div>
+      {esp.connected && !matchedChip && <Alert type="error" title="芯片不兼容">当前设备与所选固件不匹配，不会写入。</Alert>}
+      <div className="text-xs leading-6 text-muted-foreground flex gap-2"><ShieldCheck size={16} className="shrink-0 mt-1"/><p>安装会替换设备当前固件。按清单分段写入，不执行整片擦除；写入区域仍会被覆盖。当前版本尚未完成真机验收。</p></div>
+      {flashError && <Alert type="error" title="安装需要处理">{flashError} 系统不会自动重新刷写。</Alert>}
+    </section>
+    <p className="text-xs text-muted-foreground">首次使用局域网 HTTPS：<a className="underline underline-offset-4" href="/certs/pp-firmware-ca.crt" download>下载本地 CA 证书</a>，仅在你自己的电脑上确认并信任。构建、发布与证书说明见管理员部署文档。</p>
+    <Dialog open={confirm} onOpenChange={setConfirm}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>确认安装 {selected}</DialogTitle></DialogHeader>
+        <p className="text-sm leading-7">目标：{app.board}，当前芯片：{esp.chipDesc}。即将替换运行固件；此版本真机待验收。确认设备及版本后再继续，安装期间不要断电或拔线。</p>
+        <DialogFooter><Button variant="outline" onClick={() => setConfirm(false)}>取消</Button><Button onClick={() => void install()} disabled={pending || !matchedChip}>确认并安装</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>;
 }

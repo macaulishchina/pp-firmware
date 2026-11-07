@@ -115,12 +115,11 @@ export function useMinimalFlow(config: MinimalConfigState) {
       ready.config.chip &&
       normalizeChip(result.chipName) !== normalizeChip(ready.config.chip)
     ) {
-      esp.terminalWriteLine(
-        `\x1b[1;33mWarning: the connected device is ${result.chipName} but the config targets ${ready.config.chip}.\x1b[0m`,
-      );
+      setDialog({ mode: "flash-error", message: `Chip mismatch: ${result.chipName} / ${ready.config.chip}. No write started.` });
+      return;
     }
 
-    const flash = await esp.downloadAndFlashParts(resolved.parts, { eraseAll: true });
+    const flash = await esp.downloadAndFlashParts(resolved.parts, { eraseAll: false });
     if (!flash.ok) {
       esp.terminalWriteLine(`\x1b[1;31mError: ${flash.error}\x1b[0m`);
       setDialog({ mode: "flash-error", message: flash.error });

@@ -1,0 +1,152 @@
+"""Publish verified local candidate files and rebuild the Launchpad TOML directory.
+
+This host-side command does not flash devices, compile firmware, or certify hardware.
+"""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import tempfile
+import tomllib
+import zipfile
+
+SITE = Path(__file__).resolve().parents[1]
+ROOT = SITE.parent
+LIMITS = {0: 0x8000, 0x8000: 0x1000, 0x10000: 0x7F0000}
+
+
+def validate(candidate):
+    candidate = candidate.resolve()
+    manifest = json.loads((candidate / "manifest.json").read_text())
+    if manifest["target"] != "esp32c3":
+        raise ValueError("Only the PP ESP32-C3 profile is accepted")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?", manifest["version"]):
+        raise ValueError("Invalid version")
+    offsets = set()
+    names = set()
+    for item in manifest["flash_files"]:
+        offset = int(item["offset"], 0)
+        if offset not in LIMITS or offset in offsets:
+            raise ValueError("Unexpected layout; publishing NVS/duplicate offsets is refused")
+        offsets.add(offset)
+        name = item["file"]
+        if not isinstance(name, str) or Path(name).name != name or not name.endswith(".bin") or name in names:
+            raise ValueError("Image names must be simple basenames")
+        names.add(name)
+        path = candidate / name
+        if path.is_symlink():
+            raise ValueError("Images cannot be symlinks")
+        data = path.read_bytes()
+        if not 0 < len(data) <= LIMITS[offset] or len(data) != item["bytes"]:
+            raise ValueError("Image size mismatch")
+        if hashlib.sha256(data).hexdigest() != item["sha256"]:
+            raise ValueError("Image SHA256 mismatch")
+    if offsets != set(LIMITS):
+        raise ValueError("Expected bootloader, partition table and factory application")
+    return manifest
+
+
+def atomic_text(path, text):
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".catalog-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(name, 0o644)
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def update_catalog():
+    entries = []
+    for path in sorted((ROOT / "releases").glob("*/*/manifest.json")):
+        manifest = json.loads(path.read_text())
+        entries.append((path.parent.relative_to(ROOT / "releases").as_posix(), manifest))
+    quote = lambda value: json.dumps(value, ensure_ascii=False)
+    names = [f'{m["application"]} · {m["version"]}' for _, m in entries]
+    text = 'esp_toml_version = 1.0\nfirmware_images_url = "/firmware/"\n'
+    text += "supported_apps = " + quote(names) + "\n"
+    for (relative, m), title in zip(entries, names, strict=True):
+        base = "/firmware/" + relative + "/"
+        files = sorted(m["flash_files"], key=lambda item: int(item["offset"], 0))
+        text += f"\n[{quote(title)}]\n"
+        for key, value in {
+            "description": m["description"], "version": m["version"],
+            "board": "FoloToy AI Passport", "acceptance": m["hardware_acceptance"],
+            "download": base + "firmware.zip", "manifest": base + "manifest.json",
+        }.items():
+            text += f"{key} = {quote(value)}\n"
+        text += 'chipsets = ["ESP32-C3"]\nconsole_baudrate = 115200\n'
+        text += f'readme.text = {quote(base + "README.md")}\n'
+        for key, values in {
+            "parts": [base + f["file"] for f in files],
+            "addresses": [f["offset"] for f in files],
+            "sizes": [f["bytes"] for f in files],
+            "sha256": [f["sha256"] for f in files],
+        }.items():
+            text += f"image.esp32-c3.{key} = {quote(values)}\n"
+    tomllib.loads(text)  # Never replace the live catalog with malformed TOML.
+    atomic_text(SITE / "config/pp.toml", text)
+
+
+def publish(candidate, app_id, description, readme):
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,40}", app_id):
+        raise ValueError("Invalid application id")
+    candidate = Path(candidate)
+    manifest = validate(candidate)
+    manifest = {**manifest, "description": description}
+    target = ROOT / "releases" / app_id / manifest["version"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        existing = json.loads((target / "manifest.json").read_text())
+        if existing != manifest:
+            raise ValueError("Published versions are immutable; choose a new version")
+        validate(target)
+    else:
+        stage = Path(tempfile.mkdtemp(prefix=".staging-", dir=target.parent))
+        try:
+            for item in manifest["flash_files"]:
+                shutil.copyfile(candidate / item["file"], stage / item["file"])
+            (stage / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+            (stage / "README.md").write_text(Path(readme).read_text())
+            # Only named public license files may accompany the image whitelist.
+            licenses = []
+            for name in ("LICENSE.folotoy", "SourceHanSansSC.LICENSE.txt"):
+                source = candidate / name
+                if source.is_symlink():
+                    raise ValueError("Public license files cannot be symlinks")
+                if source.is_file():
+                    shutil.copyfile(source, stage / name)
+                    licenses.append(name)
+            with zipfile.ZipFile(stage / "firmware.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+                for name in ["manifest.json", "README.md", *licenses, *(f["file"] for f in manifest["flash_files"])]:
+                    archive.write(stage / name, name)
+            # mkdtemp defaults to 0700; published files must be readable by nginx.
+            stage.chmod(0o755)
+            for path in stage.iterdir():
+                path.chmod(0o644)
+            os.replace(stage, target)
+        finally:
+            if stage.exists():
+                shutil.rmtree(stage)
+    update_catalog()
+    print(target)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("candidate", type=Path)
+    parser.add_argument("--id", required=True)
+    parser.add_argument("--description", required=True)
+    parser.add_argument("--readme", required=True, type=Path)
+    args = parser.parse_args()
+    lock = ROOT / "private/publish.lock"
+    with lock.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        publish(args.candidate, args.id, args.description, args.readme)

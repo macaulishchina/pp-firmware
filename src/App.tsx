@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, FooterCard, IconTextActionCard } from "@espressif/dashboard-ui-components";
+import { Button, IconTextActionCard } from "@espressif/dashboard-ui-components";
 import { EspProvider, useEsp } from "./esp/EspContext";
 import { getWebSerialSupportIssue } from "./lib/serial";
 import { Navbar } from "./components/Navbar";
 import { WebSerialUnsupported } from "./components/WebSerialUnsupported";
-import { HomeTab } from "./components/tabs/HomeTab";
+
 import { QuickStartTab } from "./components/tabs/QuickStartTab";
-import { DiyTab } from "./components/tabs/DiyTab";
+
 import { ConsoleTab } from "./components/tabs/ConsoleTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
-import { AboutTab } from "./components/tabs/AboutTab";
+
 import { FlashStatusDialog, type AppFlashLinks } from "./components/modals/FlashStatusDialog";
 import type { TabId } from "./types";
 import { Cpu, Plug } from "lucide-react";
@@ -18,16 +18,13 @@ function TabPanel({ active, children }: { active: boolean; children: React.React
   return <div className={active ? "fade-in-down" : "hidden"}>{children}</div>;
 }
 
-function getInitialTab(): TabId {
-  const params = new URLSearchParams(window.location.search);
-  return params.has("solution") || params.has("flashConfigURL") ? "quickstart" : "home";
-}
+function getInitialTab(): TabId { return "quickstart"; }
 
 function Launchpad() {
   const [activeTab, setActiveTab] = useState<TabId>(getInitialTab);
   const [flashModalOpen, setFlashModalOpen] = useState(false);
   const [flashLinks, setFlashLinks] = useState<AppFlashLinks>({});
-  const { fitTerminal, connected, chipDesc, connect } = useEsp();
+  const { fitTerminal, connected, chipDesc, busy, connect } = useEsp();
   const deviceReady = connected && chipDesc !== "default";
   const wasDeviceReady = useRef(deviceReady);
 
@@ -63,36 +60,30 @@ function Launchpad() {
           <div className="mb-4 space-y-2">
           <IconTextActionCard 
             icon={<Cpu />} 
-            title={"ESP Launchpad"}
-            description={"Helps you flash the selected firmware image onto your device. Ensure your device is connected to the serial USB port."} 
+            title={"连接 PP"}
+            description={"通过数据线将 PP 连接到当前电脑，在 Chrome 或 Edge 中选择 USB JTAG/serial 串口。连接会进入下载模式，不会立即安装固件。"}
             color="secondary" size="lg" variant="solid" 
-            actions={<Button color="disabled" fullWidth={false} variant="default" onClick={() => void connect()}> <Plug className="h-5 w-5" aria-hidden /> Connect</Button>} />
+            actions={<Button disabled={busy} color="secondary" fullWidth={false} variant="default" onClick={() => void connect()}> <Plug className="h-5 w-5" aria-hidden /> 连接设备</Button>} />
           </div>
         )}
 
 
-        <TabPanel active={activeTab === "home"}>
-          <HomeTab onTabChange={setActiveTab} />
-        </TabPanel>
+
         <TabPanel active={activeTab === "quickstart"}>
           <QuickStartTab goToConsole={goToConsole} onFlashStatus={showFlashStatus} />
         </TabPanel>
-        <TabPanel active={activeTab === "diy"}>
-          <DiyTab goToConsole={goToConsole} />
-        </TabPanel>
+
         <TabPanel active={activeTab === "console"}>
           <ConsoleTab />
         </TabPanel>
         <TabPanel active={activeTab === "settings"}>
           <SettingsTab />
         </TabPanel>
-        <TabPanel active={activeTab === "about"}>
-          <AboutTab onTabChange={setActiveTab} />
-        </TabPanel>
+
       </main>
 
       <div className="mt-auto py-3 text-center text-muted-foreground">
-      <FooterCard />
+      <span className="text-xs">基于开源 ESP Launchpad · 本地固件目录</span>
       </div>
 
       <FlashStatusDialog

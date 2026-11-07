@@ -5,7 +5,12 @@ export interface AppConfig {
   description?: string;
   chipsets: string[];
   /** Maps a lowercased chipset name (or dev-kit name) to a firmware image filename. */
-  image: Record<string, string>;
+  image: Record<string, import("./publishedFirmware").PublishedImage>;
+  version?: string;
+  board?: string;
+  acceptance?: string;
+  download?: string;
+  manifest?: string;
   /** Maps a lowercased chipset name to the list of supported dev-kit names. */
   developKits?: Record<string, string[]>;
   readme?: { text?: string };
@@ -42,7 +47,7 @@ const SOLUTION_TOML_URLS: Record<string, string> = {
   mcpagent: "https://adwait-esp.github.io/flasher/config/mcp_agent_config.toml",
 };
 
-const DEFAULT_TOML_URL = "https://espressif.github.io/esp-rainmaker/launchpad.toml";
+const DEFAULT_TOML_URL = "/config/pp.toml";
 
 function resolveTomlUrl(params: URLSearchParams): { url: string; isDefault: boolean } {
   const solution = params.get("solution");
@@ -54,7 +59,7 @@ function resolveTomlUrl(params: URLSearchParams): { url: string; isDefault: bool
     const crossDomain = params.get("crossDomain") === "true";
     return { url: crossDomain ? CORS_PROXY + externalURL : externalURL, isDefault: false };
   }
-  return { url: DEFAULT_TOML_URL, isDefault: true };
+  return { url: DEFAULT_TOML_URL, isDefault: false };
 }
 
 /** Fetches and parses the Launchpad TOML config based on the current URL query params. */

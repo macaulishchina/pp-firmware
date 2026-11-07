@@ -23,7 +23,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, "index.html"),
-        minimalLaunchpad: resolve(import.meta.dirname, "minimal-launchpad/index.html"),
       },
     },
   },

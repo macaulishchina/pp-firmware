@@ -21,7 +21,7 @@ export function TerminalView() {
       cols: 120,
       rows: TERMINAL_ROWS,
       fontSize: 14,
-      scrollback: 9999999,
+      scrollback: 5000,
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);

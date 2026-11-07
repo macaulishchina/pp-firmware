@@ -33,13 +33,12 @@ export function FlashStatusDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="text-info">ESP Firmware Flashing Status</DialogTitle>
+          <DialogTitle className="text-info">固件写入完成</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-2 text-sm">
           <p>
-            Flashing of firmware is completed! Click the <b>Reset Device</b> button on the Console
-            tab to reset your device with the newly flashed firmware.
+            固件已写入并完成传输校验，已请求设备重启。请观察 PP 屏幕，或在串口日志中输入 report 验证应用；这不等于全部硬件功能已验收。
           </p>
           {hasAppLinks && (
             <p className="text-muted-foreground">

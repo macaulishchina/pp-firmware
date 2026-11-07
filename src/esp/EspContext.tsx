@@ -12,6 +12,8 @@ import type { Terminal } from "xterm";
 import type { FitAddon } from "xterm-addon-fit";
 import { IconTextActionCard } from "@espressif/dashboard-ui-components";
 import { Cpu } from "lucide-react";
+import { md5 } from "js-md5";
+import { verifyImage } from "../lib/publishedFirmware";
 import { fitTerminalColumns } from "../lib/terminal";
 import {
   defaultSerialSettings,
@@ -72,6 +74,8 @@ export interface FlashResult {
 export interface FlashPart {
   url: string;
   address: number;
+  size?: number;
+  sha256?: string;
 }
 
 /** Optional overrides for `resetDevice()`. */
@@ -399,6 +403,7 @@ export function EspProvider({ children }: { children: ReactNode }) {
         flashFreq: "keep",
         eraseAll,
         compress: true,
+        calculateMD5Hash: (image) => md5(image),
       };
       return runFlashOperation((loader) => loader.writeFlash(flashOptions));
     },
@@ -429,16 +434,28 @@ export function EspProvider({ children }: { children: ReactNode }) {
   const downloadAndFlashParts = useCallback(
     async (parts: FlashPart[], overrides: FlashOverrides = {}): Promise<FlashResult> => {
       flashModeRef.current = "quickstart";
-      const files: FlashFile[] = [];
-      for (const part of parts) {
-        const data = await getImageData(part.url);
-        if (data === undefined) {
-          termRef.current?.writeln(`Image file not found: ${part.url}`);
-          return { ok: false, error: `Unable to download firmware image: ${part.url}` };
+      setBusy(true);
+      try {
+        const files: FlashFile[] = [];
+        for (const part of parts) {
+          const data = await getImageData(part.url);
+          if (data === undefined) {
+            termRef.current?.writeln(`Image file not found: ${part.url}`);
+            return { ok: false, error: `Unable to download firmware image: ${part.url}` };
+          }
+          if (part.size !== undefined && part.sha256) {
+            try {
+              await verifyImage(data, {size: part.size, sha256: part.sha256});
+            } catch (error) {
+              return {ok: false, error: errorMessage(error)};
+            }
+          }
+          files.push({ data, address: part.address });
         }
-        files.push({ data, address: part.address });
+        return await writeFlash(files, overrides.eraseAll ?? false);
+      } finally {
+        setBusy(false);
       }
-      return writeFlash(files, overrides.eraseAll ?? false);
     },
     [writeFlash],
   );
@@ -460,21 +477,25 @@ export function EspProvider({ children }: { children: ReactNode }) {
     if (!t) return;
 
     setBusy(true);
-    await closePort();
-    const consoleBaudrate = options.consoleBaudrate ?? getConsoleBaudrateForReconnect();
-    await t.connect(consoleBaudrate, options.serialOptions ?? getSerialOptions(settingsRef.current));
-    sessionRef.current = "console";
-    setCliEnabled(true);
-    setBusy(false);
-
-    await t.setDTR(false);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await t.setDTR(true);
-
-    const device = deviceRef.current;
-    const term = termRef.current;
-    if (device && term) {
-      await startConsoleRead(device, term, () => connectedRef.current);
+    try {
+      await closePort();
+      const consoleBaudrate = options.consoleBaudrate ?? getConsoleBaudrateForReconnect();
+      await t.connect(consoleBaudrate, options.serialOptions ?? getSerialOptions(settingsRef.current));
+      sessionRef.current = "console";
+      setCliEnabled(true);
+      await t.setDTR(false);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await t.setDTR(true);
+      const device = deviceRef.current;
+      const term = termRef.current;
+      if (device && term) {
+        // Console reading is long-lived; restarting finishes after the reset signal.
+        void startConsoleRead(device, term, () => connectedRef.current).catch(error => {
+          term.writeln(`Console error: ${errorMessage(error)}`);
+        });
+      }
+    } finally {
+      setBusy(false);
     }
   }, [closePort, ensureDevice, getConsoleBaudrateForReconnect, startConsoleRead]);
 
