@@ -1,5 +1,6 @@
 """Read-only LAN deployment checks. Never requests a real serial port or flashes."""
 import asyncio
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -9,7 +10,7 @@ import urllib.error
 import urllib.request
 import zipfile
 import io
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 ROOT=Path(__file__).resolve().parents[2]
 URL="https://110.0.0.82:9443"
@@ -53,6 +54,10 @@ async def browser_checks():
         page.on('request',lambda request:requests.append(request.url))
         await page.goto(URL,wait_until='networkidle')
         await page.get_by_role('heading',name='固件目录',exact=True).wait_for()
+        assert await page.locator('nav').get_by_role('button',name='连接设备',exact=True).count()==0
+        assert await page.get_by_role('button',name='连接设备',exact=True).count()==1
+        await page.get_by_role('heading',name='配置与使用',exact=False).wait_for()
+        assert await page.get_by_role('button',name='打开 USB 配置',exact=True).is_enabled()
         assert await page.get_by_text('PA-Terminal · 0.1.0',exact=True).count()>0
         assert await page.get_by_text('已发布 · 真机待验收',exact=True).count()==1
         assert await page.get_by_role('button',name='安装到 PP',exact=True).is_disabled()
@@ -75,20 +80,33 @@ async def browser_checks():
         await page.get_by_text('Console Command Input',exact=True).wait_for()
         await page.get_by_role('tab',name='固件目录',exact=True).click()
         await page.wait_for_function("getComputedStyle(document.querySelector('.fade-in-down')).opacity === '1'")
+        assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         await page.screenshot(path=str(ROOT/'private/logs/website-desktop.png'),full_page=True)
         # A cancelled browser port selection must not request any firmware or start writing.
         await page.evaluate('''() => {
           window.serialRequests=0;
-          navigator.serial.requestPort=async () => {window.serialRequests++;throw new DOMException('Cancelled','NotFoundError');};
+          navigator.serial.requestPort=() => {window.serialRequests++;return new Promise((resolve,reject)=>{window.cancelPort=()=>reject(new DOMException('Cancelled','NotFoundError'))})};
         }''')
         await page.get_by_role('button',name='连接设备',exact=True).first.click()
-        await page.wait_for_timeout(250)
+        await expect(page.get_by_role('button',name='连接设备',exact=True)).to_be_disabled()
+        await expect(page.get_by_role('button',name='USB 配置',exact=True)).to_be_disabled()
+        await expect(page.get_by_role('button',name='打开 USB 配置',exact=True)).to_be_disabled()
+        await page.evaluate('cancelPort()')
+        await expect(page.get_by_role('button',name='打开 USB 配置',exact=True)).to_be_enabled()
         assert await page.evaluate('window.serialRequests')==1
         assert await page.get_by_role('button',name='安装到 PP',exact=True).is_disabled()
+        await page.get_by_role('button',name='打开 USB 配置',exact=True).click()
+        await page.wait_for_url(URL+'/pp-setup.html')
+        await page.get_by_role('heading',name='连接你的 PA',exact=True).wait_for()
+        assert await page.locator('#device').inner_text()=='尚未连接'
+        assert await page.evaluate('window.serialRequests') is None
         assert not errors,errors
         await browser.close()
-        return {'catalog_without_device':'passed','download':'passed','tabs':'passed','cancelled_port_no_write':'passed','javascript_errors':errors}
+        return {'catalog_without_device':'passed','download':'passed','tabs':'passed','single_connection_control':'passed','usb_configuration_entry':'passed','cancelled_port_no_write':'passed','javascript_errors':errors}
 
 if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--url',default=URL,help='Read-only site URL, including an isolated local preview')
+    URL=parser.parse_args().url.rstrip('/')
     http_checks()
     print(json.dumps(asyncio.run(browser_checks()),ensure_ascii=False))

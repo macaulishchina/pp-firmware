@@ -3,15 +3,17 @@ import {
   Alert, Button, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@espressif/dashboard-ui-components";
-import { Download, FileCheck2, Usb, ShieldCheck } from "lucide-react";
+import { Download, FileCheck2, Usb, ShieldCheck, ArrowRight, SlidersHorizontal, Check } from "lucide-react";
 import { useEsp } from "../../esp/EspContext";
 import { getApp, loadLaunchpadConfig, type LaunchpadConfig } from "../../lib/tomlConfig";
 import { resolvePublishedParts } from "../../lib/publishedFirmware";
 import type { AppFlashLinks } from "../modals/FlashStatusDialog";
+import { DeviceConnection } from "../DeviceConnection";
 
-export function QuickStartTab({goToConsole, onFlashStatus}: {
+export function QuickStartTab({goToConsole, onFlashStatus, onConfigure}: {
   goToConsole: () => void;
   onFlashStatus: (links: AppFlashLinks) => void;
+  onConfigure: () => Promise<void>;
 }) {
   const esp = useEsp();
   const [config, setConfig] = useState<LaunchpadConfig | null>(null);
@@ -20,6 +22,7 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
   const [flashError, setFlashError] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [pending, setPending] = useState(false);
+  const [installed, setInstalled] = useState("");
   const submitting = useRef(false);
   const app = config && selected ? getApp(config, selected) : undefined;
   const matchedChip = app?.chipsets.find(chip => chip.replace(/-/g, "").toLowerCase() === esp.chipName.replace(/-/g, "").toLowerCase());
@@ -45,7 +48,7 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
       const result = await esp.downloadAndFlashParts(parts, {eraseAll: false});
       if (!result.ok) throw new Error(result.error || "安装未完成，请查看串口日志。");
       written = true;
-      goToConsole();
+      setInstalled(selected);
       await esp.resetDevice();
       onFlashStatus({});
     } catch (error) {
@@ -58,17 +61,18 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
   if (loadError) return <Alert type="error" title="固件目录加载失败">{loadError}。请刷新页面重试。</Alert>;
   if (!app || !config) return <p className="text-muted-foreground">正在读取固件目录…</p>;
   const files = app.image[app.chipsets[0]?.toLowerCase()];
-  return <div className="space-y-6">
+  return <div className="space-y-5">
     <header className="space-y-2">
       <h1 className="text-2xl font-semibold tracking-tight">固件目录</h1>
-      <p className="text-sm text-muted-foreground">选择版本，查看说明，然后通过当前电脑的 USB 为 PP 安装固件。</p>
+      <p className="text-sm text-muted-foreground">选择固件，连接设备安装，再完成终端配置。</p>
     </header>
     <section className="rounded-xl border border-border bg-card p-6 space-y-5">
+      <h2 className="flex items-center gap-3 text-sm font-semibold"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">1</span>选择固件</h2>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-2">
           <label htmlFor="firmware-select" className="text-xs font-medium text-muted-foreground">已发布固件</label>
           <Select value={selected} onValueChange={name => {setSelected(name); setFlashError("");}} disabled={pending || esp.busy}>
-            <SelectTrigger id="firmware-select" className="min-w-[280px]" aria-label="选择固件"><SelectValue /></SelectTrigger>
+            <SelectTrigger id="firmware-select" className="w-[320px] max-w-full" aria-label="选择固件"><SelectValue /></SelectTrigger>
             <SelectContent>{config.supported_apps.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
@@ -87,19 +91,31 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
         {app.manifest && <a className="inline-flex items-center gap-2 px-3 py-2 text-sm underline underline-offset-4" href={app.manifest} target="_blank" rel="noreferrer"><FileCheck2 size={16}/>镜像清单</a>}
       </div>
     </section>
-    <section className="rounded-xl border border-border p-6 space-y-4">
+    <section className="rounded-xl border border-border bg-card p-6 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-2">
-          <h2 className="font-semibold">USB 安装</h2>
-          <p className="text-sm text-muted-foreground">{esp.connected ? `已连接：${esp.chipDesc}` : "请先连接设备。选择串口前不会下载或写入固件。"}</p>
-        </div>
-        <Button color="secondary" disabled={!esp.connected || !matchedChip || esp.busy || pending} onClick={() => setConfirm(true)}><Usb size={16}/>{pending ? "正在校验与安装…" : "安装到 PP"}</Button>
+        <h2 className="flex items-center gap-3 text-sm font-semibold"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">2</span>USB 安装</h2>
+        <button type="button" className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground" onClick={goToConsole}>查看串口日志</button>
       </div>
-      {esp.connected && !matchedChip && <Alert type="error" title="芯片不兼容">当前设备与所选固件不匹配，不会写入。</Alert>}
-      <div className="text-xs leading-6 text-muted-foreground flex gap-2"><ShieldCheck size={16} className="shrink-0 mt-1"/><p>安装会替换设备当前固件。按清单分段写入，不执行整片擦除；写入区域仍会被覆盖。当前版本尚未完成真机验收。</p></div>
+      <DeviceConnection />
+      {esp.connected && esp.chipName !== "default" && !matchedChip && <Alert type="error" title="芯片不兼容">当前设备与所选固件不匹配，不会写入。</Alert>}
+      <div className="flex flex-wrap items-center justify-between gap-5">
+        <div className="flex max-w-xl items-start gap-2 text-xs leading-6 text-muted-foreground"><ShieldCheck size={16} className="mt-1 shrink-0"/><p>连接只用于识别设备；确认安装后才校验并写入固件，保留 NVS 配置。</p></div>
+        <Button color="secondary" fullWidth={false} disabled={!esp.connected || !matchedChip || esp.busy || pending} onClick={() => setConfirm(true)}><Usb size={16}/>{pending ? "正在校验与安装…" : "安装到 PP"}</Button>
+      </div>
+      {installed === selected && <p role="status" className="flex items-center gap-2 text-sm text-emerald-700"><Check size={16} />镜像已写入并校验。请核对 PP 屏幕，再按需要完成下方配置。</p>}
       {flashError && <Alert type="error" title="安装需要处理">{flashError} 系统不会自动重新刷写。</Alert>}
     </section>
-    <p className="text-xs text-muted-foreground">首次使用局域网 HTTPS：<a className="underline underline-offset-4" href="/certs/pp-firmware-ca.crt" download>下载本地 CA 证书</a>，仅在你自己的电脑上确认并信任。构建、发布与证书说明见管理员部署文档。</p>
+    <section className="rounded-xl border border-border bg-card p-6 space-y-5">
+      <h2 className="flex items-center gap-3 text-sm font-semibold"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">3</span>配置与使用</h2>
+      <div className="flex flex-wrap items-center justify-between gap-5">
+        <div className="max-w-xl space-y-2">
+          <p className="text-sm">安装 PA-Terminal 后，通过 USB 写入 Wi-Fi、PA 配对文件和 CA 证书。</p>
+          <p className="text-xs leading-6 text-muted-foreground">配对文件在 PA 配置后台生成，有效期 10 分钟。进入配置页时会先断开当前串口。PPDemo 系列可在设备上直接使用。</p>
+        </div>
+        <Button variant="outline" fullWidth={false} disabled={esp.busy || pending} onClick={() => void onConfigure()}><SlidersHorizontal size={16}/>打开 USB 配置<ArrowRight size={16}/></Button>
+      </div>
+      <p className="border-t border-border pt-4 text-xs leading-6 text-muted-foreground">首次使用或配置设备时，可<a className="ml-1 underline underline-offset-4" href="/certs/pp-firmware-ca.crt" download>下载 CA 证书</a>；仅在自己的电脑上确认并信任。</p>
+    </section>
     <Dialog open={confirm} onOpenChange={setConfirm}>
       <DialogContent>
         <DialogHeader><DialogTitle>确认安装 {selected}</DialogTitle></DialogHeader>

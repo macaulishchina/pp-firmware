@@ -38,6 +38,11 @@ docker compose -p pp-firmware -f deploy/compose.yaml up -d
 仅前端修改：`npm run build` 后刷新页面即可。部署配置或证书变化才重建该站点容器。
 首次或证书更新后，使用 `curl --cacert ../private/tls/ca.crt https://110.0.0.82:9443/healthz` 核对。
 
+固件目录按“选择固件 → USB 安装 → 配置与使用”组织。连接／断开集中在安装区，
+导航只切换页面；串口连接期间禁用配置跳转，取消选择后恢复。安装成功后保留在目录，
+从“打开 USB 配置”继续；跳转先释放当前串口，避免刷写页和配置页争用设备。
+PPDemo 系列直接在设备使用，USB 配网与配对用于 PA-Terminal。
+
 ## Windows 信任本地 CA
 
 2026-11-07 起本站复制使用 GoldenNest 的服务器证书和公开 CA，证书涵盖公网

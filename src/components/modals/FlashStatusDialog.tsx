@@ -38,7 +38,7 @@ export function FlashStatusDialog({
 
         <div className="space-y-2 text-sm">
           <p>
-            固件已写入并完成传输校验，已请求设备重启。请观察 PP 屏幕，或在串口日志中输入 report 验证应用；这不等于全部硬件功能已验收。
+            固件已写入并完成校验，已请求设备重启。请核对 PP 屏幕；安装 PA-Terminal 后，可在固件目录下继续完成 USB 配置。PPDemo 系列可在设备上直接使用。
           </p>
           {hasAppLinks && (
             <p className="text-muted-foreground">
@@ -87,7 +87,7 @@ export function FlashStatusDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Done
+            完成
           </Button>
         </DialogFooter>
       </DialogContent>

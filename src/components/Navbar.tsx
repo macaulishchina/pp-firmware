@@ -2,7 +2,7 @@ import { useEsp } from "../esp/EspContext";
 import type { TabId } from "../types";
 import type { LucideIcon } from "lucide-react";
 
-import { Plug, Unplug, Settings, SquareChevronRight, Timer } from "lucide-react";
+import { Settings, SlidersHorizontal, SquareChevronRight, Timer } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@espressif/dashboard-ui-components";
 
 
@@ -21,15 +21,17 @@ const NAV_ITEMS: NavItem[] = [
 export function Navbar({
   activeTab,
   onTabChange,
+  onConfigure,
 }: {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  onConfigure: () => Promise<void>;
 }) {
-  const { connected, chipDesc, busy, connect, disconnect } = useEsp();
-  const deviceReady = connected && chipDesc !== "default";
+  const { busy } = useEsp();
 
   return (
-    <nav className="sticky top-0 z-50 flex items-center gap-4 border-b border-border bg-background px-4 py-2">
+    <nav className="sticky top-0 z-50 border-b border-border bg-background/95 px-4" aria-label="固件中心导航">
+      <div className="mx-auto flex min-h-16 max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-3">
       <button
         type="button"
         className="flex shrink-0 items-center"
@@ -38,28 +40,20 @@ export function Navbar({
       >
         <span className="text-lg font-semibold tracking-tight">PP <span className="text-muted-foreground font-normal">固件中心</span></span>
       </button>
-      <a href="/pp-setup.html" className="shrink-0 text-sm text-muted-foreground hover:text-foreground">PA 终端配置</a>
-      <div className="ml-auto flex w-[70%] items-center">
-        <Tabs value={activeTab} className="w-full">
-        <TabsList variant="rounded" className="w-full">
+      <div className="ml-auto flex items-center gap-6">
+        <Tabs value={activeTab}>
+        <TabsList variant="rounded">
           {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
             <TabsTrigger key={id} value={id} onClick={() => onTabChange(id)}>
               <Icon className="h-4 w-4" aria-hidden /> {label}
             </TabsTrigger>
           ))}
-      {deviceReady ? (
-          <TabsTrigger disabled={busy} onClick={() => void disconnect()} value="disconnect">
-            <Unplug className="h-4 w-4" aria-hidden />
-            断开连接
-          </TabsTrigger>
-        ) : (
-          <TabsTrigger disabled={busy} onClick={() => void connect()} value="connect">
-           <Plug className="h-4 w-4" aria-hidden />
-            连接设备
-          </TabsTrigger>
-        )}
         </TabsList>
         </Tabs>
+        <button type="button" disabled={busy} onClick={() => void onConfigure()} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">
+          <SlidersHorizontal size={16} aria-hidden /> USB 配置
+        </button>
+      </div>
       </div>
       </nav>
   );

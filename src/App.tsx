@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, IconTextActionCard } from "@espressif/dashboard-ui-components";
+import { Alert } from "@espressif/dashboard-ui-components";
 import { EspProvider, useEsp } from "./esp/EspContext";
 import { getWebSerialSupportIssue } from "./lib/serial";
 import { Navbar } from "./components/Navbar";
@@ -12,7 +12,7 @@ import { SettingsTab } from "./components/tabs/SettingsTab";
 
 import { FlashStatusDialog, type AppFlashLinks } from "./components/modals/FlashStatusDialog";
 import type { TabId } from "./types";
-import { Cpu, Plug } from "lucide-react";
+import { DeviceConnection } from "./components/DeviceConnection";
 
 function TabPanel({ active, children }: { active: boolean; children: React.ReactNode }) {
   return <div className={active ? "fade-in-down" : "hidden"}>{children}</div>;
@@ -24,7 +24,9 @@ function Launchpad() {
   const [activeTab, setActiveTab] = useState<TabId>(getInitialTab);
   const [flashModalOpen, setFlashModalOpen] = useState(false);
   const [flashLinks, setFlashLinks] = useState<AppFlashLinks>({});
-  const { fitTerminal, connected, chipDesc, busy, connect } = useEsp();
+  const { fitTerminal, connected, chipDesc, busy, disconnect } = useEsp();
+  const [setupError, setSetupError] = useState("");
+  const changingPage = useRef(false);
   const deviceReady = connected && chipDesc !== "default";
   const wasDeviceReady = useRef(deviceReady);
 
@@ -51,26 +53,28 @@ function Launchpad() {
     setFlashModalOpen(true);
   };
 
+  async function openConfiguration() {
+    if (busy || changingPage.current) return;
+    changingPage.current = true;
+    setSetupError("");
+    try {
+      await disconnect();
+      window.location.assign("/pp-setup.html");
+    } catch (error) {
+      setSetupError(`无法释放串口：${error instanceof Error ? error.message : String(error)}`);
+      changingPage.current = false;
+    }
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
-      <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
+      <Navbar activeTab={activeTab} onTabChange={setActiveTab} onConfigure={openConfiguration} />
 
       <main className={`flex-1 ${activeTab === "home" ? "" : "container mx-auto w-full max-w-6xl px-4 py-6"}`}>
-        {activeTab !== "about" && activeTab !== "home" && !connected && (
-          <div className="mb-4 space-y-2">
-          <IconTextActionCard 
-            icon={<Cpu />} 
-            title={"连接 PP"}
-            description={"通过数据线将 PP 连接到当前电脑，在 Chrome 或 Edge 中选择 USB JTAG/serial 串口。连接会进入下载模式，不会立即安装固件。"}
-            color="secondary" size="lg" variant="solid" 
-            actions={<Button disabled={busy} color="secondary" fullWidth={false} variant="default" onClick={() => void connect()}> <Plug className="h-5 w-5" aria-hidden /> 连接设备</Button>} />
-          </div>
-        )}
-
-
-
+        {setupError && <div className="mb-5"><Alert type="error" title="USB 配置暂未打开">{setupError}</Alert></div>}
+        {activeTab !== "quickstart" && <div className="mb-6"><DeviceConnection /></div>}
         <TabPanel active={activeTab === "quickstart"}>
-          <QuickStartTab goToConsole={goToConsole} onFlashStatus={showFlashStatus} />
+          <QuickStartTab goToConsole={goToConsole} onFlashStatus={showFlashStatus} onConfigure={openConfiguration} />
         </TabPanel>
 
         <TabPanel active={activeTab === "console"}>

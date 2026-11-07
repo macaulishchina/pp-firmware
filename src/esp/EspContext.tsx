@@ -174,6 +174,7 @@ export function EspProvider({ children }: { children: ReactNode }) {
   const [chipDesc, setChipDesc] = useState("default");
   const [chipName, setChipName] = useState("default");
   const [busy, setBusy] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [cliEnabled, setCliEnabled] = useState(false);
 
   // Mutable device handles live in refs (they are not render state).
@@ -297,36 +298,41 @@ export function EspProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(
     async (options: ConnectOptions = {}): Promise<ConnectResult> => {
+      setConnecting(true);
       try {
-        await ensureDevice();
-      } catch (error) {
-        // The user dismissed the port picker (NotFoundError) or the port could not be opened.
-        const err = error as Error;
-        return { ok: false, cancelled: err?.name === "NotFoundError", error: errorMessage(err) };
-      }
-      options.onPortSelected?.();
-      clearTerminalOnConnectRef.current = options.clearTerminal ?? true;
-      try {
-        const loaderOptions: LoaderOptions = {
-          transport: transportRef.current!,
-          baudrate: options.baudrate ?? settingsRef.current.flashingBaudrate,
-          terminal: espLoaderTerminal,
-          serialOptions: options.serialOptions ?? getSerialOptions(settingsRef.current),
-        };
-        const esploader = new ESPLoader(loaderOptions);
-        esploaderRef.current = esploader;
-        connectedRef.current = true;
-        setConnected(true);
-        const desc = await esploader.main();
-        setChipDesc(desc);
-        setChipName(esploader.chip.CHIP_NAME);
-        await esploader.flashId();
-        sessionRef.current = "bootloader";
-        return { ok: true, chipName: esploader.chip.CHIP_NAME };
-      } catch (error) {
-        // Mirror original behaviour: surface failure via the "default" chip state.
-        sessionRef.current = "none";
-        return { ok: false, error: errorMessage(error) };
+        try {
+          await ensureDevice();
+        } catch (error) {
+          // The user dismissed the port picker (NotFoundError) or the port could not be opened.
+          const err = error as Error;
+          return { ok: false, cancelled: err?.name === "NotFoundError", error: errorMessage(err) };
+        }
+        options.onPortSelected?.();
+        clearTerminalOnConnectRef.current = options.clearTerminal ?? true;
+        try {
+          const loaderOptions: LoaderOptions = {
+            transport: transportRef.current!,
+            baudrate: options.baudrate ?? settingsRef.current.flashingBaudrate,
+            terminal: espLoaderTerminal,
+            serialOptions: options.serialOptions ?? getSerialOptions(settingsRef.current),
+          };
+          const esploader = new ESPLoader(loaderOptions);
+          esploaderRef.current = esploader;
+          connectedRef.current = true;
+          setConnected(true);
+          const desc = await esploader.main();
+          setChipDesc(desc);
+          setChipName(esploader.chip.CHIP_NAME);
+          await esploader.flashId();
+          sessionRef.current = "bootloader";
+          return { ok: true, chipName: esploader.chip.CHIP_NAME };
+        } catch (error) {
+          // Mirror original behaviour: surface failure via the "default" chip state.
+          sessionRef.current = "none";
+          return { ok: false, error: errorMessage(error) };
+        }
+      } finally {
+        setConnecting(false);
       }
     },
     [ensureDevice, espLoaderTerminal],
@@ -519,7 +525,7 @@ export function EspProvider({ children }: { children: ReactNode }) {
       connected,
       chipDesc,
       chipName,
-      busy,
+      busy: busy || connecting,
       cliEnabled,
       setConsoleBaudrateOverride,
       registerTerminal,
@@ -541,6 +547,7 @@ export function EspProvider({ children }: { children: ReactNode }) {
       chipDesc,
       chipName,
       busy,
+      connecting,
       cliEnabled,
       setConsoleBaudrateOverride,
       registerTerminal,
