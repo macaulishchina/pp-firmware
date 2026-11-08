@@ -9,6 +9,7 @@ export interface AppConfig {
   version?: string;
   board?: string;
   acceptance?: string;
+  channel?: "daily" | "stable" | "preview";
   download?: string;
   manifest?: string;
   /** Maps a lowercased chipset name to the list of supported dev-kit names. */

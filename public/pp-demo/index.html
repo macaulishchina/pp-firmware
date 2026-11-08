@@ -17,7 +17,7 @@
   </header>
   <main>
     <noscript>请启用 JavaScript 后体验模拟按键。本页不会访问真实设备。</noscript>
-    <div class="intro"><div><p class="eyebrow">PERSONAL AGENT × AI PASSPORT</p><h1>按住说，松开交给嘟嘟。</h1><p class="intro-copy">先把每一步交互做好，再让它发生在掌心。</p></div><span class="revision">INTERACTION STUDY <b>01</b></span></div>
+    <div class="intro"><div><p class="eyebrow">PERSONAL AGENT × AI PASSPORT</p><h1>按住说话，松开发送。</h1><p class="intro-copy">先把每一步交互做好，再让它发生在掌心。</p></div><span class="revision">INTERACTION STUDY <b>01</b></span></div>
     <div class="workspace">
       <section class="device-lab" aria-label="PP 模拟设备">
         <div class="stage-caption"><span class="small-dot"></span>240 × 320 <span class="caption-separator">/</span> 半双工语音</div>
@@ -25,6 +25,56 @@
         <div class="stage-bottom"><span class="status-indicator"><i id="stage-dot"></i><span id="stage-status" aria-live="polite">就绪，等你开口</span></span><span>PC · 鼠标或键盘操作</span></div>
       </section>
       <aside class="control-panel">
+        <details class="setup-panel" open>
+          <summary>配网与 PA 云控 <small>完整流程模拟</small></summary>
+          <p class="setup-caption">USB 只刷固件。首次热点配网 → Wi-Fi 联网 → 8 位码配对 → PA 管理配置。</p>
+          <div class="fault-actions"><button id="setup-first">模拟首次开机</button><button id="setup-ready">恢复已配对演示</button></div>
+          <form id="setup-wifi" class="setup-form">
+            <h3>手机热点配网页 · 模拟</h3>
+            <div class="setup-grid"><label>初始 Wi-Fi 名称<input id="setup-ssid" value="Home Wi-Fi" maxlength="32" required></label><label>Wi-Fi 密码<input id="setup-password" type="password" placeholder="模拟填写，不保存密码" autocomplete="off" maxlength="63"></label></div>
+            <label>PA 业务地址<input id="setup-address" type="url" value="http://47.109.34.254:8047" required></label>
+            <label class="setup-check"><input type="checkbox" id="setup-fail">模拟 PA 无法连接</label>
+            <button type="submit" id="setup-connect">保存并模拟联网</button>
+          </form>
+          <form id="setup-pair" class="setup-form">
+            <h3>PA 后台 · 配对设备</h3>
+            <div class="setup-grid"><label>PP 屏幕上的 8 位数字<input id="setup-code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" placeholder="请输入设备显示的数字" autocomplete="off" required></label><label>设备名称<input id="setup-name" value="我的 PP" maxlength="24" required></label></div>
+            <button type="submit" id="setup-bind">确认配对</button>
+          </form>
+          <form id="cloud-form" class="setup-form">
+            <h3>PA 后台 · 设备配置</h3>
+            <fieldset id="cloud-fields"><div class="setup-grid">
+              <label>默认音量<input id="cloud-volume" type="number" min="0" max="100" step="5" value="65" required></label>
+              <label>默认输入模式<select id="cloud-mode"><option value="steer">引导</option><option value="queue">排队</option></select></label>
+              <label>自动播报<select id="cloud-speak"><option value="brief">简短播报</option><option value="full">完整播报</option><option value="off">关闭，仅文字</option></select></label>
+              <label>电源策略<select id="cloud-keep"><option value="yes">保持在线</option><option value="no">空闲后休眠</option></select></label>
+              <label>空闲休眠<select id="cloud-sleep"><option value="120">2 分钟</option><option value="300">5 分钟</option><option value="600">10 分钟</option></select></label>
+              <label>屏幕亮度<input id="cloud-brightness" type="number" min="40" max="100" value="85" required></label>
+              <label>正文字号<select id="cloud-text"><option value="10">标准</option><option value="11">较大</option></select></label>
+              <label>语音音色<select id="cloud-voice"><option>系统中文音色 A</option><option>系统中文音色 B</option></select></label>
+              <label>播报语速<select id="cloud-rate"><option value="0.8">稍慢</option><option value="1" selected>正常</option><option value="1.2">稍快</option></select></label>
+              <label>允许离线查看历史<select id="cloud-cache"><option value="yes">开启，保留少量缓存</option><option value="no">关闭，仅在线读取</option></select></label>
+            </div>
+            <div class="wifi-editor"><h3>Wi-Fi 连接顺序</h3><div id="cloud-networks"></div><button type="button" id="wifi-add">＋ 添加网络</button><p class="setup-caption">从上往下连接；每轮失败从第一套重试，最多 3 轮。成功即停止，不切换已连接网络。“可连接／失败”为模拟结果，不是真实网络检测。</p></div>
+            <button type="submit">保存到 PA（模拟）</button></fieldset>
+            <p class="setup-caption">保存后在 PP 菜单选择“重载配置”；网络配置变更会在空闲点重新连接。密码只在本页内存中，不发送、不写入浏览器持久存储。</p>
+            <p class="setup-caption">简短播报只读完整句，余下查看文字；完整播报也可按 OK 结束。缓存容量、播报阈值及其他范围均为交互演示参考，最终以实际硬件测量与支持能力为准。</p>
+          </form>
+          <div class="setup-state" id="setup-state" role="status"></div>
+          <div class="fault-actions"><button id="cloud-reload">模拟设备重载配置</button><button id="setup-revoke">撤销设备配对</button></div>
+          <details class="wifi-trace"><summary>本次 Wi-Fi 连接过程</summary><ol id="wifi-attempts"></ol></details>
+        </details>
+        <details class="status-settings" open>
+          <summary><span>顶部状态演示</span><small>模拟值</small></summary>
+          <div class="status-fields">
+            <label class="ssid-field">Wi-Fi 名称<input id="wifi-name" maxlength="32" value="Home Wi-Fi" autocomplete="off" spellcheck="false"></label>
+            <label>信号强度<select id="wifi-strength"><option value="strong">强 · −52 dBm</option><option value="medium">中 · −67 dBm</option><option value="weak">弱 · −82 dBm</option><option value="off">未连接</option></select></label>
+            <label class="battery-field"><span>电量 <output id="battery-value">85%</output></span><input id="battery-level" type="range" min="0" max="100" step="1" value="85"></label>
+            <label>PA 连接<select id="pa-state"><option value="online">已连接</option><option value="offline">不可达</option></select></label>
+          </div>
+          <label class="clock-option"><input id="clock-synced" type="checkbox" checked>时间已同步</label>
+          <p>Wi-Fi 名称和具体信号值可在设备菜单的连接状态中查看。</p>
+        </details>
         <section class="panel-section">
           <div class="section-heading"><span class="section-index">01</span><h2>选一个场景，试着按下 OK</h2></div>
           <div class="scenarios" role="group" aria-label="体验场景"></div>
@@ -32,12 +82,18 @@
         </section>
         <section class="panel-section keys-section">
           <div class="section-heading"><span class="section-index">02</span><h2>三个按键，保持简单</h2></div>
-          <dl class="key-guide"><div><dt>按住 OK</dt><dd>说话，松开立即停止收音</dd></div><div><dt>短按 OK</dt><dd>播放时立即停播；平时打开菜单</dd></div><div><dt>双击 OK</dt><dd>切换引导 / 排队，记住你的选择</dd></div><div><dt>上 / 下</dt><dd>翻阅全文，或选择菜单项</dd></div></dl>
+          <dl class="key-guide"><div><dt>按住 OK</dt><dd>说话，松开立即停止收音</dd></div><div><dt>短按 OK</dt><dd>播放时立即停播；平时打开菜单</dd></div><div><dt>双击 OK</dt><dd>切换引导 / 排队，记住你的选择</dd></div><div><dt>长按上</dt><dd>回到形象主页；任务继续，未发送输入丢弃</dd></div><div><dt>上 / 下</dt><dd>播报中调音量；其他时候浏览对话或选择菜单项</dd></div></dl>
           <div class="mode-note" id="mode-note"><span class="mode-icon">↳</span><span><strong>当前：直接引导</strong><small>执行中再说话，会补充或调整当前执行。</small></span></div>
         </section>
+        <section class="panel-section history-section">
+          <div class="section-heading"><span class="section-index">03</span><h2>聊天记录 · 少量缓存，按需读取</h2></div>
+          <div class="fault-actions"><button id="history-cache-clear">清空本地缓存</button></div>
+          <p class="fault-note" id="history-cache-status"></p>
+          <p class="fault-note">直接按设备 ↑↓ 浏览：先翻当前正文，到边界继续查看前后对话。已预置历史，可模拟断网对比本地缓存与在线读取；OK 返回最新对话。</p>
+        </section>
         <section class="panel-section fault-section">
-          <div class="section-heading"><span class="section-index">03</span><h2>出问题，也要知道下一步</h2></div>
-          <div class="fault-actions"><button id="recognition-failure" aria-pressed="false">让下次识别失败</button><button id="network-toggle">模拟断网</button><button id="task-complete" disabled>模拟任务完成</button></div>
+          <div class="section-heading"><span class="section-index">04</span><h2>出问题，也要知道下一步</h2></div>
+          <div class="fault-actions"><button id="empty-input">下次模拟空输入</button><button id="recognition-failure" aria-pressed="false">让下次识别失败</button><button id="record-limit">模拟录音达到60秒</button><button id="network-toggle">模拟断网</button><button id="task-complete" disabled>模拟任务完成</button></div>
           <p class="fault-note" id="fault-note">失败的录音不会提交；恢复后可以重新按住说话。</p>
         </section>
         <details class="interaction-record"><summary>这次交互的过程<span id="event-count">0 步</span></summary><ol id="event-log"></ol></details>

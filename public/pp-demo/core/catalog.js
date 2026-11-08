@@ -28,6 +28,10 @@ export function createScenarioCatalog(definitions) {
       title: text(item.background.title, 'background.title'),
       body: text(item.background.body, 'background.body'),
     });
+    if (item.image) {
+      if (!/^\.\/[a-z0-9-]+\.(svg|png|jpg)$/.test(item.image.src || '')) throw new TypeError('Scenario image must be a local fixture');
+      scenario.image = Object.freeze({ src: item.image.src, alt: text(item.image.alt, 'image.alt') });
+    }
     catalog[item.id] = Object.freeze(scenario);
   }
   return Object.freeze(catalog);

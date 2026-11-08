@@ -1,4 +1,3 @@
-import { useEsp } from "../esp/EspContext";
 import type { TabId } from "../types";
 import type { LucideIcon } from "lucide-react";
 
@@ -21,13 +20,10 @@ const NAV_ITEMS: NavItem[] = [
 export function Navbar({
   activeTab,
   onTabChange,
-  onConfigure,
 }: {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
-  onConfigure: () => Promise<void>;
 }) {
-  const { busy } = useEsp();
 
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-background/95 px-4" aria-label="固件中心导航">
@@ -50,9 +46,9 @@ export function Navbar({
           ))}
         </TabsList>
         </Tabs>
-        <button type="button" disabled={busy} onClick={() => void onConfigure()} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">
-          <SlidersHorizontal size={16} aria-hidden /> USB 配置
-        </button>
+        <a href="/pp-setup.html" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <SlidersHorizontal size={16} aria-hidden /> 配网与配对
+        </a>
       </div>
       </div>
       </nav>

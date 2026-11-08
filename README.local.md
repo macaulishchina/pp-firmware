@@ -1,11 +1,12 @@
 # PP 固件中心（Dell 本地部署）
 
 外网入口：**https://47.109.34.254:9443/**（FRP TCP 转发）。局域网入口：**https://110.0.0.82:9443/**。这是本地自用的静态固件展示、选择、下载和 USB 安装网站。
-已上架 PA-Terminal 0.1.1 及历史版本、PPDemo 0.2.0 英文版和 PPDemo-Zh 0.2.0 中文版。
-0.1.1 修复 TLS 握手内存不足，已通过 PP 真机连接、三次入口重启后的重连和串口边界验证，
-完整语音与长期体验仍待验收；同应用的新版本优先展示。没有管理员上传后台、在线编译或 OTA。
-固件站本身不运行 Agent；PA-Terminal 通过本站的两条设备专用 HTTPS 路由连接 PA。
-网站部署或添加固件不重启 PA。
+已上架 PA-Terminal 0.2.1-preview.1 预览版、0.2.0 日常使用版及历史版本，
+另保留 PPDemo 0.2.0 英文版和 PPDemo-Zh 0.2.0 中文版。
+0.2 系列使用协议 2，支持中文语音、独立会话、任务消息和有界 Flash 缓存；
+预览版用于安装体验和问题反馈，不代表已完成全部真机及长期稳定性验收。
+固件站本身不运行 Agent。PP 业务直接连接 PA 的 HTTP/WS 8047，HTTPS 9443 只用于固件分发。
+没有管理员上传后台、在线编译或 OTA；网站部署或添加固件不重启 PA。
 
 基于 ESP Launchpad 上游提交 `804b308c28fe3e136e9c2b850c8534da374fa9e8`，保留 Apache-2.0
 许可证。底层串口、esptool 连接及刷写复用上游，当前依赖版本由 package-lock.json 固定。
@@ -41,10 +42,11 @@ docker compose -p pp-firmware -f deploy/compose.yaml up -d
 仅前端修改：`npm run build` 后刷新页面即可。部署配置或证书变化才重建该站点容器。
 首次或证书更新后，使用 `curl --cacert ../private/tls/ca.crt https://110.0.0.82:9443/healthz` 核对。
 
-固件目录按“选择固件 → USB 安装 → 配置与使用”组织。连接／断开集中在安装区，
-导航只切换页面；串口连接期间禁用配置跳转，取消选择后恢复。安装成功后保留在目录，
-从“打开 USB 配置”继续；跳转先释放当前串口，避免刷写页和配置页争用设备。
-PPDemo 系列直接在设备使用，USB 配网与配对用于 PA-Terminal。
+固件目录按“选择固件 → USB 安装 → 配网与配对”组织。连接／断开集中在安装区；
+配网说明是独立静态页，不读写串口，安装中也可查看。
+PA-Terminal 0.2.0 由设备热点完成初始 Wi-Fi 与 PA 地址设置，联网后显示八位配对码，
+在 PA 后台绑定；后续配置由 PA 后台云控。没有 USB 配网或配对文件导入。
+PPDemo 系列直接按设备菜单使用。网站的浏览器刷写需要可信 HTTPS，普通 PP 业务 HTTP/WS 不需要 CA。
 
 ## PP 交互演示
 
@@ -62,8 +64,9 @@ node --test tests/passport-demo.test.mjs
 /home/macaulish/workspace/dell-voice-assistant/.venv/bin/python tests/verify_passport_demo.py
 ```
 
-标准前端构建会复制该静态目录。仅更新演示时，可只复制 `public/pp-demo/` 至
-`dist/pp-demo/`，不需要构建主站、重启网站或 PA，也不更换设备固件。
+演示源码直接挂载到网站 `/pp-demo/`，该路径不缓存。修改 `public/pp-demo/` 后刷新即可，
+不用构建、复制到 dist、运行验收或重启服务。标准前端构建仍包含静态演示，便于普通打包。
+日常需求讨论优先直接预览，只有明确要求时才进行测试、提交或发布整理。
 
 ## Windows 信任本地 CA
 
@@ -107,27 +110,16 @@ python3 tools/publish.py \
 
 ## 本地适配与已验证范围
 
-### PA-Terminal 候选配置入口
+### PA-Terminal 0.2.0 配置入口（待正式发布）
 
-源码新增 `/pp-setup.html`，通过 Web Serial 配置 Wi-Fi、公开 CA 证书和一次性配对 JSON；
-只向已连接设备写入，不上传网站或存储到 localStorage。需要可信 HTTPS 与 Chrome／Edge。
-配对材料由 PA 配置后台生成，网站不能生成 PA 管理员授权。恢复出厂单独确认；服务器配对还需撤销。
+`/pp-setup.html` 改为热点配网、8047 业务地址及八位码配对说明。
+旧 USB 配置脚本和表单已删除；不会收集 Wi-Fi 密码、PA 管理员授权或配对文件。
+当前公开 0.1.x 镜像不等于 0.2.0 已发布；新固件完成实际硬件验收后再更新公开目录。
 
-PA-Terminal 候选位于 `../candidates/pa-terminal/<版本>/<应用 SHA256>/`。
-2026-11-07 已授权部署：PA 0.4.34、USB 配置页、固件目录与设备代理均已生效。
-外网 HTTPS 配对、WSS hello、撤销后拒绝连接及浏览器下载校验通过；未自动刷写真机。
-代理目标为 Docker 网关 `192.168.32.1:8047`，PA 仅信任本站容器 `192.168.32.2/32`；
-重建网络后若地址变化，应核对并更新这两处，不扩大到任意来源。
-候选检查请用 `npx vite build --outDir /tmp/pp-site-candidate`，不要为检查直接覆盖线上 dist。
-USB 模拟浏览器验收命令：
-
-```sh
-/home/macaulish/workspace/dell-voice-assistant/.venv/bin/python \
-  /home/macaulish/workspace/dell-voice-assistant/scripts/verify_passport_ui.py \
-  --site /home/macaulish/workspace/pp-firmware/site
-```
-
-验收使用模拟串口，不能代替 Windows 真 USB、Wi-Fi、TLS 或扬声器测试。
+PA-Terminal 构建候选位于 `../candidates/pa-terminal/<版本>/<应用 SHA256>/`。
+仅验证前端时用 `npx vite build --outDir ../candidates/site-preview`，不能覆盖线上 dist。
+PC 验收可对隔离站点运行 `python tools/verify_site.py --url <本机预览地址>`；
+串口选择被模拟为取消，不连接设备、不自动刷写。
 
 本次已执行的发布命令（同一镜像重复执行幂等）：
 

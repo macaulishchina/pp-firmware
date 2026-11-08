@@ -38,7 +38,7 @@ export function FlashStatusDialog({
 
         <div className="space-y-2 text-sm">
           <p>
-            固件已写入并完成校验，已请求设备重启。请核对 PP 屏幕；安装 PA-Terminal 后，可在固件目录下继续完成 USB 配置。PPDemo 系列可在设备上直接使用。
+            固件已写入并完成校验，已请求设备重启。请核对 PP 屏幕；安装 PA-Terminal 后，按设备屏幕通过热点配网，再到 PA 后台输入八位配对码。PPDemo 系列可在设备上直接使用。
           </p>
           {hasAppLinks && (
             <p className="text-muted-foreground">

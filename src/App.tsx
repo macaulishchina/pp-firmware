@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert } from "@espressif/dashboard-ui-components";
 import { EspProvider, useEsp } from "./esp/EspContext";
 import { getWebSerialSupportIssue } from "./lib/serial";
 import { Navbar } from "./components/Navbar";
@@ -24,9 +23,7 @@ function Launchpad() {
   const [activeTab, setActiveTab] = useState<TabId>(getInitialTab);
   const [flashModalOpen, setFlashModalOpen] = useState(false);
   const [flashLinks, setFlashLinks] = useState<AppFlashLinks>({});
-  const { fitTerminal, connected, chipDesc, busy, disconnect } = useEsp();
-  const [setupError, setSetupError] = useState("");
-  const changingPage = useRef(false);
+  const { fitTerminal, connected, chipDesc } = useEsp();
   const deviceReady = connected && chipDesc !== "default";
   const wasDeviceReady = useRef(deviceReady);
 
@@ -53,28 +50,14 @@ function Launchpad() {
     setFlashModalOpen(true);
   };
 
-  async function openConfiguration() {
-    if (busy || changingPage.current) return;
-    changingPage.current = true;
-    setSetupError("");
-    try {
-      await disconnect();
-      window.location.assign("/pp-setup.html");
-    } catch (error) {
-      setSetupError(`无法释放串口：${error instanceof Error ? error.message : String(error)}`);
-      changingPage.current = false;
-    }
-  }
-
   return (
     <div className="flex min-h-screen flex-col">
-      <Navbar activeTab={activeTab} onTabChange={setActiveTab} onConfigure={openConfiguration} />
+      <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
 
       <main className={`flex-1 ${activeTab === "home" ? "" : "container mx-auto w-full max-w-6xl px-4 py-6"}`}>
-        {setupError && <div className="mb-5"><Alert type="error" title="USB 配置暂未打开">{setupError}</Alert></div>}
         {activeTab !== "quickstart" && <div className="mb-6"><DeviceConnection /></div>}
         <TabPanel active={activeTab === "quickstart"}>
-          <QuickStartTab goToConsole={goToConsole} onFlashStatus={showFlashStatus} onConfigure={openConfiguration} />
+          <QuickStartTab goToConsole={goToConsole} onFlashStatus={showFlashStatus} />
         </TabPanel>
 
         <TabPanel active={activeTab === "console"}>

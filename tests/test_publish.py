@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import struct
 from pathlib import Path
 import tempfile
 import tomllib
@@ -21,12 +22,33 @@ class PublishTest(unittest.TestCase):
         files=[]
         for offset,name in [(0,"bootloader.bin"),(0x8000,"partition-table.bin"),(0x10000,"app.bin")]:
             data=bytes([offset%251])*16
+            if offset == 0x8000:
+                data = self.table()
             (self.candidate/name).write_bytes(data)
             files.append({"offset":hex(offset),"file":name,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
         self.manifest={"application":"Example","version":"0.1.0","target":"esp32c3","hardware_acceptance":"pending","flash_files":files}
         (self.candidate/"manifest.json").write_text(json.dumps(self.manifest))
         self.readme=self.root/"readme.md";self.readme.write_text("Operator instructions")
     def tearDown(self): self.temp.cleanup()
+    @staticmethod
+    def table(size=0x7F0000):
+        rows = [(1,2,0x9000,0x6000,b'nvs'),(1,1,0xF000,0x1000,b'phy'),(0,0,0x10000,size,b'factory')]
+        return b''.join(struct.pack('<HBBII16sI',0x50AA,k,s,o,n,label,0) for k,s,o,n,label in rows)+b'\xff'*32
+    def replace_image(self, name, data):
+        (self.candidate/name).write_bytes(data)
+        item=next(item for item in self.manifest['flash_files'] if item['file']==name)
+        item.update(bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
+        (self.candidate/'manifest.json').write_text(json.dumps(self.manifest))
+    def test_application_must_fit_actual_partition_not_total_flash(self):
+        self.replace_image('partition-table.bin',self.table(0x1000))
+        self.replace_image('app.bin',b'x'*4097)
+        with self.assertRaisesRegex(ValueError,'overwrite'):
+            pub.validate(self.candidate)
+    def test_daily_release_does_not_claim_full_hardware_acceptance(self):
+        pub.publish(self.candidate,'example','Daily use',self.readme,channel='daily')
+        config=tomllib.loads((pub.SITE/'config/pp.toml').read_text())
+        self.assertEqual(config['Example · 0.1.0']['channel'],'daily')
+        self.assertEqual(config['Example · 0.1.0']['acceptance'],'pending')
     def test_atomic_publication_and_private_files_excluded(self):
         (self.candidate/"private-secret.txt").write_text("not public")
         pub.publish(self.candidate,"example","description",self.readme)

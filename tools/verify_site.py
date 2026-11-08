@@ -3,6 +3,7 @@ import asyncio
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import ssl
 import tomllib
@@ -26,14 +27,14 @@ def http_checks():
     assert 'PPDemo · 0.2.0' in config['supported_apps']
     for name in config['supported_apps']:
         app=config[name]
-        assert app['acceptance']=='pending'
+        assert app['acceptance'] in {'pending','verified'}
         for path,size,digest in zip(app['image']['esp32-c3']['parts'],app['image']['esp32-c3']['sizes'],app['image']['esp32-c3']['sha256'],strict=True):
             data,_=get(path)
             assert len(data)==size and hashlib.sha256(data).hexdigest()==digest,path
         data,_=get(app['download'])
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             required={'manifest.json','README.md',*(Path(p).name for p in app['image']['esp32-c3']['parts'])}
-            assert required <= set(archive.namelist()) <= required|{'LICENSE.folotoy','SourceHanSansSC.LICENSE.txt'}
+            assert required <= set(archive.namelist()) <= required|{'LICENSE.folotoy','SourceHanSansSC.LICENSE.txt','LittleFS.LICENSE.txt'}
             if name.startswith(('PPDemo-Zh', 'PA-Terminal')):
                 assert 'SourceHanSansSC.LICENSE.txt' in archive.namelist()
             assert archive.testzip() is None
@@ -57,9 +58,9 @@ async def browser_checks(default_app):
         assert await page.locator('nav').get_by_role('button',name='连接设备',exact=True).count()==0
         assert await page.get_by_role('button',name='连接设备',exact=True).count()==1
         await page.get_by_role('heading',name='配置与使用',exact=False).wait_for()
-        assert await page.get_by_role('button',name='打开 USB 配置',exact=True).is_enabled()
+        assert await page.get_by_role('link',name='查看配网与配对',exact=True).is_visible()
         assert await page.get_by_text(default_app,exact=True).count()>0
-        assert await page.get_by_text('已发布 · 真机待验收',exact=True).count()==1
+        assert await page.get_by_text(re.compile(r'^(已发布 · 真机待验收|已发布 · 日常使用|已发布 · 预览版|真机已验收)$')).count()==1
         assert await page.get_by_role('button',name='安装到 PP',exact=True).is_disabled()
         assert await page.evaluate('window.isSecureContext')
         assert not [u for u in requests if not u.startswith(URL) and not u.startswith('data:')],requests
@@ -89,20 +90,21 @@ async def browser_checks(default_app):
         }''')
         await page.get_by_role('button',name='连接设备',exact=True).first.click()
         await expect(page.get_by_role('button',name='连接设备',exact=True)).to_be_disabled()
-        await expect(page.get_by_role('button',name='USB 配置',exact=True)).to_be_disabled()
-        await expect(page.get_by_role('button',name='打开 USB 配置',exact=True)).to_be_disabled()
+        await expect(page.get_by_role('link',name='查看配网与配对',exact=True)).to_be_visible()
         await page.evaluate('cancelPort()')
-        await expect(page.get_by_role('button',name='打开 USB 配置',exact=True)).to_be_enabled()
         assert await page.evaluate('window.serialRequests')==1
         assert await page.get_by_role('button',name='安装到 PP',exact=True).is_disabled()
-        await page.get_by_role('button',name='打开 USB 配置',exact=True).click()
-        await page.wait_for_url(URL+'/pp-setup.html')
-        await page.get_by_role('heading',name='连接你的 PA',exact=True).wait_for()
-        assert await page.locator('#device').inner_text()=='尚未连接'
-        assert await page.evaluate('window.serialRequests') is None
+        async with page.expect_popup() as opened:
+            await page.get_by_role('link',name='查看配网与配对',exact=True).click()
+        guide=await opened.value
+        await guide.get_by_role('heading',name='连接你的 PP',exact=True).wait_for()
+        assert await guide.locator('input,form,script').count()==0
+        assert await guide.get_by_text('输入八位配对码',exact=True).count()==1
+        assert await page.evaluate('window.serialRequests')==1
+        await guide.close()
         assert not errors,errors
         await browser.close()
-        return {'catalog_without_device':'passed','download':'passed','tabs':'passed','single_connection_control':'passed','usb_configuration_entry':'passed','cancelled_port_no_write':'passed','javascript_errors':errors}
+        return {'catalog_without_device':'passed','download':'passed','tabs':'passed','single_connection_control':'passed','hotspot_pairing_guide':'passed','cancelled_port_no_write':'passed','javascript_errors':errors}
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)

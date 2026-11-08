@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import tempfile
 import tomllib
 import zipfile
@@ -17,6 +18,25 @@ import zipfile
 SITE = Path(__file__).resolve().parents[1]
 ROOT = SITE.parent
 LIMITS = {0: 0x8000, 0x8000: 0x1000, 0x10000: 0x7F0000}
+
+
+def application_limit(table):
+    entry = struct.Struct("<HBBII16sI")
+    ranges, application = [], None
+    for offset in range(0, len(table) - entry.size + 1, entry.size):
+        magic, kind, subtype, start, size, name, flags = entry.unpack_from(table, offset)
+        if magic in {0xFFFF, 0xEBEB}:
+            break
+        if magic != 0x50AA or start < 0x9000 or not size or start + size > 0x800000:
+            raise ValueError("Invalid partition table")
+        if any(start < end and begin < start + size for begin, end in ranges):
+            raise ValueError("Overlapping partitions")
+        ranges.append((start, start + size))
+        if kind == 0 and subtype == 0 and start == 0x10000:
+            application = size
+    if application is None:
+        raise ValueError("Missing factory application partition")
+    return application
 
 
 def validate(candidate):
@@ -28,6 +48,7 @@ def validate(candidate):
         raise ValueError("Invalid version")
     offsets = set()
     names = set()
+    image_data = {}
     for item in manifest["flash_files"]:
         offset = int(item["offset"], 0)
         if offset not in LIMITS or offset in offsets:
@@ -41,12 +62,15 @@ def validate(candidate):
         if path.is_symlink():
             raise ValueError("Images cannot be symlinks")
         data = path.read_bytes()
+        image_data[offset] = data
         if not 0 < len(data) <= LIMITS[offset] or len(data) != item["bytes"]:
             raise ValueError("Image size mismatch")
         if hashlib.sha256(data).hexdigest() != item["sha256"]:
             raise ValueError("Image SHA256 mismatch")
     if offsets != set(LIMITS):
         raise ValueError("Expected bootloader, partition table and factory application")
+    if len(image_data[0x10000]) > application_limit(image_data[0x8000]):
+        raise ValueError("Application would overwrite a data/cache partition")
     return manifest
 
 
@@ -91,6 +115,8 @@ def update_catalog():
         }.items():
             text += f"{key} = {quote(value)}\n"
         text += 'chipsets = ["ESP32-C3"]\nconsole_baudrate = 115200\n'
+        if m.get("release_channel"):
+            text += f'channel = {quote(m["release_channel"])}\n'
         text += f'readme.text = {quote(base + "README.md")}\n'
         for key, values in {
             "parts": [base + f["file"] for f in files],
@@ -103,12 +129,16 @@ def update_catalog():
     atomic_text(SITE / "config/pp.toml", text)
 
 
-def publish(candidate, app_id, description, readme):
+def publish(candidate, app_id, description, readme, channel=None):
     if not re.fullmatch(r"[a-z][a-z0-9_-]{0,40}", app_id):
         raise ValueError("Invalid application id")
     candidate = Path(candidate)
     manifest = validate(candidate)
     manifest = {**manifest, "description": description}
+    if channel is not None:
+        if channel not in {"daily", "stable", "preview"}:
+            raise ValueError("Unknown release channel")
+        manifest["release_channel"] = channel
     target = ROOT / "releases" / app_id / manifest["version"]
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
@@ -125,7 +155,7 @@ def publish(candidate, app_id, description, readme):
             (stage / "README.md").write_text(Path(readme).read_text())
             # Only named public license files may accompany the image whitelist.
             licenses = []
-            for name in ("LICENSE.folotoy", "SourceHanSansSC.LICENSE.txt"):
+            for name in ("LICENSE.folotoy", "SourceHanSansSC.LICENSE.txt", "LittleFS.LICENSE.txt"):
                 source = candidate / name
                 if source.is_symlink():
                     raise ValueError("Public license files cannot be symlinks")
@@ -153,8 +183,9 @@ if __name__ == "__main__":
     parser.add_argument("--id", required=True)
     parser.add_argument("--description", required=True)
     parser.add_argument("--readme", required=True, type=Path)
+    parser.add_argument("--channel", choices=["daily", "stable", "preview"])
     args = parser.parse_args()
     lock = ROOT / "private/publish.lock"
     with lock.open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        publish(args.candidate, args.id, args.description, args.readme)
+        publish(args.candidate, args.id, args.description, args.readme, args.channel)

@@ -1,6 +1,38 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.1-preview.1"]
+description = "PP 交互终端预览版：中文语音、独立会话、任务消息与离线缓存。安装后按说明连接正式 PA 8047。"
+version = "0.2.1-preview.1"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.1/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.1/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.1/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.1/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.1/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.1/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2968416]
+image.esp32-c3.sha256 = ["a6639853712a9c9514b6336f0effeb71a7d7bdad0de4eb5a0b26345aa7ece33a", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "653adb23059f6d572d846d402de7372de3cc5a5e3c5a348bf697f0b97f89674c"]
+
+["PA-Terminal · 0.2.0"]
+description = "中文语音、独立会话、任务消息、Flash文字与缩略图缓存；日常使用版本，剩余问题按使用反馈迭代。"
+version = "0.2.0"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.0/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.0/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "daily"
+readme.text = "/firmware/pa-terminal/0.2.0/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.0/bootloader.bin", "/firmware/pa-terminal/0.2.0/partition-table.bin", "/firmware/pa-terminal/0.2.0/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2968416]
+image.esp32-c3.sha256 = ["a6639853712a9c9514b6336f0effeb71a7d7bdad0de4eb5a0b26345aa7ece33a", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "ee05bb82b2bcb3796b2fa4643018fa2c5f26b362957e95cd958628cb445d1882"]
 
 ["PA-Terminal · 0.1.1"]
 description = "修复 TLS 握手内存不足；已通过 PP 真机连接、断线恢复和串口边界验证，语音体验待验收。"

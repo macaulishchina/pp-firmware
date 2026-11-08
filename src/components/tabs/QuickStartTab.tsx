@@ -10,10 +10,9 @@ import { resolvePublishedParts } from "../../lib/publishedFirmware";
 import type { AppFlashLinks } from "../modals/FlashStatusDialog";
 import { DeviceConnection } from "../DeviceConnection";
 
-export function QuickStartTab({goToConsole, onFlashStatus, onConfigure}: {
+export function QuickStartTab({goToConsole, onFlashStatus}: {
   goToConsole: () => void;
   onFlashStatus: (links: AppFlashLinks) => void;
-  onConfigure: () => Promise<void>;
 }) {
   const esp = useEsp();
   const [config, setConfig] = useState<LaunchpadConfig | null>(null);
@@ -76,7 +75,7 @@ export function QuickStartTab({goToConsole, onFlashStatus, onConfigure}: {
             <SelectContent>{config.supported_apps.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs text-amber-700">{app.acceptance === "verified" ? "真机已验收" : "已发布 · 真机待验收"}</span>
+        <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs text-amber-700">{app.acceptance === "verified" ? "真机已验收" : app.channel === "preview" ? "已发布 · 预览版" : app.channel === "daily" ? "已发布 · 日常使用" : "已发布 · 真机待验收"}</span>
       </div>
       <p className="text-sm leading-7">{app.description}</p>
       <dl className="grid grid-cols-2 md:grid-cols-4 gap-5 text-sm">
@@ -109,17 +108,17 @@ export function QuickStartTab({goToConsole, onFlashStatus, onConfigure}: {
       <h2 className="flex items-center gap-3 text-sm font-semibold"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">3</span>配置与使用</h2>
       <div className="flex flex-wrap items-center justify-between gap-5">
         <div className="max-w-xl space-y-2">
-          <p className="text-sm">安装 PA-Terminal 后，通过 USB 写入 Wi-Fi、PA 配对文件和 CA 证书。</p>
-          <p className="text-xs leading-6 text-muted-foreground">配对文件在 PA 配置后台生成，有效期 10 分钟。进入配置页时会先断开当前串口。PPDemo 系列可在设备上直接使用。</p>
+          <p className="text-sm">安装 PA-Terminal 0.2.0 后，按屏幕连接设备热点，填写初始 Wi-Fi 与 PA 业务地址。</p>
+          <p className="text-xs leading-6 text-muted-foreground">连网后在 PA 后台输入设备的八位配对码。后续设置在 PA 后台维护，PP 菜单可以重载配置。PPDemo 系列直接在设备上使用。</p>
         </div>
-        <Button variant="outline" fullWidth={false} disabled={esp.busy || pending} onClick={() => void onConfigure()}><SlidersHorizontal size={16}/>打开 USB 配置<ArrowRight size={16}/></Button>
+        <a href="/pp-setup.html" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-muted"><SlidersHorizontal size={16}/>查看配网与配对<ArrowRight size={16}/></a>
       </div>
-      <p className="border-t border-border pt-4 text-xs leading-6 text-muted-foreground">首次使用或配置设备时，可<a className="ml-1 underline underline-offset-4" href="/certs/pp-firmware-ca.crt" download>下载 CA 证书</a>；仅在自己的电脑上确认并信任。</p>
+      <p className="border-t border-border pt-4 text-xs leading-6 text-muted-foreground">电脑访问自签证书的固件网站进行 USB 刷写时，可<a className="ml-1 underline underline-offset-4" href="/certs/pp-firmware-ca.crt" download>下载 CA 证书</a>；仅在自己的电脑上确认并信任。</p>
     </section>
     <Dialog open={confirm} onOpenChange={setConfirm}>
       <DialogContent>
         <DialogHeader><DialogTitle>确认安装 {selected}</DialogTitle></DialogHeader>
-        <p className="text-sm leading-7">目标：{app.board}，当前芯片：{esp.chipDesc}。即将替换运行固件；此版本真机待验收。确认设备及版本后再继续，安装期间不要断电或拔线。</p>
+        <p className="text-sm leading-7">目标：{app.board}，当前芯片：{esp.chipDesc}。即将替换运行固件。{app.channel === "preview" ? "此版本为预览版，由使用者安装体验并反馈问题。" : app.channel === "daily" ? "此版本用于日常使用，完整验收范围见操作说明。" : app.acceptance === "verified" ? "此版本已完成记录中的真机验收。" : "此版本真机待验收。"}确认设备及版本后再继续，安装期间不要断电或拔线。</p>
         <DialogFooter><Button variant="outline" onClick={() => setConfirm(false)}>取消</Button><Button onClick={() => void install()} disabled={pending || !matchedChip}>确认并安装</Button></DialogFooter>
       </DialogContent>
     </Dialog>
