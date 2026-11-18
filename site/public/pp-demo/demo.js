@@ -20,6 +20,7 @@ const { interaction, simulation } = PP_PROFILE;
 $('scenario-picker').innerHTML = Object.values(model.catalog).map(scene =>
   `<option value="${escape(scene.id)}">${escape(scene.title)}</option>`).join('');
 let pressed = false, pressStarted = 0, holdTimer = null, clickTimer = null, wakeGuard = false, stoppedOnPress = false;
+let pressRoute = '', transitionAt = -Infinity;
 let recordInterval = null, feedbackTimer = null;
 let secondTap = false;
 let volumeFeedbackUntil = 0, volumeSaveTimer = null;
@@ -240,6 +241,11 @@ function screenPhase() {
   if (model.view === 'home' && ['wifi-trying', 'wifi-exhausted'].includes(provisioning.stage)) return provisioning.stage;
   return model.phase;
 }
+function networkPages() {
+  const name = model.wifi.connected ? model.wifi.ssid : '未连接';
+  const rssi = model.wifi.connected ? `${model.wifi.rssi} dBm` : '未连接';
+  return model.paginate(`Wi-Fi ${name}\n${model.online ? 'PA 已连接' : 'PA 离线'}\n信号 ${rssi}\n可用内存 29516\n最大连续块 7936`);
+}
 
 function renderScreen(phase = screenPhase()) {
   const volume = model.volume;
@@ -307,7 +313,7 @@ function renderScreen(phase = screenPhase()) {
       frame.hint = '上下选择 · OK确认';
       break;
     case 'input-review-text':
-      reply(model.reviewPages[model.page], '你说的 · 待发送', '达到上限，确认后才发送', '上下查看 · OK返回');
+      reply(model.reviewPages[model.page], '你说的 · 待发送', '', '上下查看 · OK返回');
       break;
     case 'clarifying':
       reply(model.pages[model.page], '等待回答', '等待回答', '按住回答 · 长↑主页');
@@ -351,11 +357,14 @@ function renderScreen(phase = screenPhase()) {
       } else Object.assign(frame, { state: status, hint: 'OK 返回 · 长↑主页' });
       break;
     }
-    case 'status':
-      info('网络状态',
-        `${model.online ? 'PA 已连接' : 'PA 离线'}\nWi-Fi ${model.wifi.connected ? model.wifi.ssid : '未连接'}\n信号 ${model.wifi.connected ? model.wifi.rssi : 0} dBm\n可用内存 29516\n最大连续块 7936`,
-        'OK 返回 · 长↑主页');
+    case 'status': {
+      const pages = networkPages();
+      const hint = pages.length <= 1 ? 'OK 返回 · 长↑主页'
+        : model.page === 0 ? '向下翻页 · OK 返回'
+        : model.page < pages.length - 1 ? '上下翻页 · OK 返回' : '向上翻页 · OK 返回';
+      info('网络状态', pages[model.page], hint);
       break;
+    }
     case 'device-reset':
       info(provisioning.resetTarget === 'factory' ? '恢复出厂？' : provisioning.resetTarget === 'repair' ? '重新配对？' : '重新配网？',
         provisioning.resetTarget === 'factory'
@@ -380,6 +389,7 @@ function renderScreen(phase = screenPhase()) {
   hardware.screen.dataset.mode = model.mode;
   hardware.screen.dataset.playing = String(model.playing);
   hardware.screen.dataset.volumeFeedback = String(Boolean(frame.volumeFeedback));
+  if (frame.origin && frame.state === frame.origin) frame.state = '';
   hardware.content.textContent = [frame.origin, frame.body, frame.choices?.join('\n'),
     frame.image?.alt, frame.volumeFeedback ? `音量 ${volume}` : frame.state, frame.hint].filter(Boolean).join('\n');
   display.render(frame);
@@ -455,8 +465,10 @@ function startWork(job) {
   }, simulation.executionMs);
 }
 function pressOK() {
-  if (pressed) return;
-  pressed = true; pressStarted = performance.now(); $('key-ok').classList.add('pressed');
+  const now = performance.now();
+  if (pressed || (!model.sleeping && now - transitionAt <= interaction.doubleMs)) return;
+  pressRoute = model.view;
+  pressed = true; pressStarted = now; $('key-ok').classList.add('pressed');
   if (model.sleeping) { model.wake(); wakeGuard = true; render(); return; }
   if (setupHome() || model.input === 'review') return;
   if (model.view === 'history') {
@@ -499,9 +511,15 @@ function releaseOK() {
   if (!pressed) return;
   pressed = false; $('key-ok').classList.remove('pressed'); clearTimeout(holdTimer);
   if (wakeGuard) { wakeGuard = false; return; }
+  if (pressRoute !== model.view && model.input !== 'recording') return;
+  const before = model.view;
+  finishOK();
+  if (model.view !== before) transitionAt = performance.now();
+}
+function finishOK() {
   if (setupHome() && model.view === 'home') {
     provisioning.settingsParent = 'home';
-    model.view = 'settings'; model.menuIndex = 0;
+    model.openView('settings');
     render(); return;
   }
   if (model.input === 'review') {
@@ -533,7 +551,7 @@ function releaseOK() {
   } else clickTimer = later(() => {
     clickTimer = null;
     if (stopped) return;
-    model.stopPlayback(); model.view = 'menu'; model.menuIndex = 0; model.feedback = ''; render();
+    model.stopPlayback(); model.openView('menu'); model.feedback = ''; render();
   }, interaction.doubleMs);
 }
 function cancelPress(reason) {
@@ -547,6 +565,7 @@ function cancelPress(reason) {
   }
 }
 function move(direction) {
+  transitionAt = -Infinity;
   if (model.view === 'device-reset') { model.menuIndex = 1 - model.menuIndex; render(); return; }
   if (model.sleeping) { model.wake(); render(); return; }
   if (model.input === 'review') {
@@ -563,6 +582,7 @@ function move(direction) {
   if (['menu', 'settings', 'maintenance'].includes(model.view)) model.menuIndex = (model.menuIndex + direction + model.menus.length) % model.menus.length;
   else if (model.view === 'history') { browseHistory(direction); return; }
   else if (model.view === 'volume') adjustVolume(direction * -5);
+  else if (model.view === 'status') model.page = Math.max(0, Math.min(networkPages().length - 1, model.page + direction));
   else if (model.view === 'notices') {
     pendingNotice = null;
     model.noticeIndex = (model.noticeIndex + direction + model.notices.length + 1) % (model.notices.length + 1);
@@ -578,6 +598,7 @@ function move(direction) {
   render();
 }
 function returnHome() {
+  transitionAt = -Infinity;
   if (model.sleeping) { model.wake(); render(); return; }
   pendingNotice = null;
   cancelPress('返回主页，未发送输入已丢弃');
@@ -600,8 +621,8 @@ function menuOK() {
       feedback('已请求取消');
       later(() => feedback('已收到取消结果'), 350); return;
     } else if (id === 'home') { returnHome(); return; }
-    else if (id === 'back') model.view = model.view === 'maintenance' ? 'settings' : provisioning.settingsParent || 'menu';
-    else if (id === 'settings') { provisioning.settingsParent = 'menu'; model.view = 'settings'; }
+    else if (id === 'back') model.openView(model.view === 'maintenance' ? 'settings' : provisioning.settingsParent || 'menu', true);
+    else if (id === 'settings') { provisioning.settingsParent = 'menu'; model.openView('settings'); }
     else if (id === 'reload') {
       feedback(model.online ? '正在获取配置' : '离线，联网后才能重载');
       requestConfigReload(); return;
@@ -621,8 +642,7 @@ function menuOK() {
       if (!model.canSleep) { feedback('当前交互未结束，暂不休眠'); return; }
       model.sleep();
     }
-    else { model.view = id; if (id === 'notices') model.noticeIndex = 0; }
-    model.menuIndex = 0;
+    else { model.openView(id); if (id === 'notices') model.noticeIndex = 0; }
   } else if (model.view === 'device-reset') {
     if (model.menuIndex === 1) {
       if (provisioning.resetTarget === 'repair') {
@@ -645,7 +665,7 @@ function menuOK() {
   else if (model.view === 'notices') {
     if (model.noticeIndex === model.notices.length) {
       pendingNotice = null;
-      model.view = 'menu'; model.menuIndex = 0;
+      model.openView('menu', true);
     } else if (!pendingNotice) {
       const read = { notice: model.notices[model.noticeIndex] };
       pendingNotice = read;
@@ -665,7 +685,7 @@ function menuOK() {
     model.noticeIndex = Math.max(0, model.notices.indexOf(model.activeNotice));
     model.view = 'notices';
   }
-  else { model.view = model.view === 'status' ? 'settings' : 'menu'; model.menuIndex = 0; }
+  else model.openView(model.view === 'status' ? 'settings' : 'menu', true);
   render();
 }
 bindHardwareKeys({ ...hardware, press: pressOK, release: releaseOK, abort: cancelPress, move, home: returnHome });

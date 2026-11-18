@@ -43,12 +43,14 @@ async def run(lab, machine, image, scenario, spec, *, fault=False, expected=None
             last = index == len(spec["steps"]) - 1
             want = action["expect"] + (["PP Lab 注入的失败断言"] if last and fault else [])
             step = {"name": action["name"], "expected": want, "actual": []}
-            for key in ("key", "contains", "absent", "serialContains"):
+            for key in ("key", "waitMs", "contains", "absent", "serialContains"):
                 if key in action:
                     step[key] = action[key]
             if "serial" in action:
                 step["command"] = action["serial"]
             try:
+                if "waitMs" in action:
+                    await machine.invoke("advance", action["waitMs"])
                 if "key" in action:
                     step["ms"] = action.get("ms", 210)
                     await machine.invoke("press", action["key"], step["ms"])

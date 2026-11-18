@@ -31,6 +31,15 @@ async def verify(url, synthetic_report=False):
         async def phase(expected, timeout=5000):
             await expect(screen).to_have_attribute("data-phase", expected, timeout=timeout)
 
+        double_ms = await page.evaluate(
+            "async () => (await import('./core/profile.js')).PP_PROFILE.interaction.doubleMs"
+        )
+
+        async def next_ok():
+            # A second OK on another page must be a new gesture, outside the double-click window.
+            await page.wait_for_timeout(double_ms + 20)
+            await ok.click()
+
         async def open_panel(name):
             await page.locator(f'[data-panel="{name}"]').click()
             await expect(page.locator(f"#panel-{name}")).to_be_visible()
@@ -163,7 +172,7 @@ async def verify(url, synthetic_report=False):
         await expect(content).not_to_contain_text("我想安排一个轻松一点的周末")
         await ok.click()
         await phase("input-review")
-        await ok.click()
+        await next_ok()
         await expect(content).to_contain_text("已丢弃，未执行")
 
         await page.locator("#scenario-picker").select_option("task")
@@ -177,7 +186,7 @@ async def verify(url, synthetic_report=False):
         await phase("menu")
         await ok.click()
         await phase("notices")
-        await ok.click()
+        await next_ok()
         await phase("notice")
         await expect(content).to_contain_text("任务报告 · 电影推荐已整理好")
         await ok.click()
@@ -188,6 +197,18 @@ async def verify(url, synthetic_report=False):
         await page.locator("#setup-first").click()
         await phase("hotspot")
         await expect(content).to_contain_text("http://192.168.4.1")
+        await ok.dblclick()
+        await phase("settings")
+        await expect(content).to_contain_text("保持在线 · 关")
+        await down.click()
+        await ok.click()
+        await phase("status")
+        await expect(content).to_contain_text("信号 未连接")
+        await next_ok()
+        await phase("settings")
+        await next_ok()
+        await phase("status")
+        await home("hotspot")
         await expect(page.locator("#setup-wifi")).to_be_visible()
         await expect(page.locator("#setup-pair")).to_be_hidden()
         await expect(page.locator("#setup-wifi input[type=url], #setup-wifi textarea")).to_have_count(0)
@@ -200,7 +221,7 @@ async def verify(url, synthetic_report=False):
             await ok.click()
 
         async def open_maintenance():
-            await ok.click()
+            await next_ok()
             await phase("settings")
             await select_from_start(3)
             await phase("maintenance")
@@ -209,7 +230,7 @@ async def verify(url, synthetic_report=False):
         await select_from_start(2)
         await phase("device-reset")
         await expect(content).to_contain_text("重新配网？")
-        await ok.click()
+        await next_ok()
         await phase("maintenance")
         await home("unreachable")
         await open_maintenance()
@@ -243,14 +264,14 @@ async def verify(url, synthetic_report=False):
         await select_from_start(3)
         await phase("device-reset")
         await expect(content).to_contain_text("保留 Wi-Fi")
-        await ok.click()  # Cancel leaves the old identity and current selection intact.
+        await next_ok()  # Cancel leaves the old identity and current selection intact.
         await phase("maintenance")
-        await ok.click()
+        await next_ok()
         await down.click()
         await ok.click()
         await phase("pairing")
         code = (await content.text_content()).splitlines()[1]
-        await ok.click()
+        await next_ok()
         await phase("settings")
         await page.locator("#setup-code").fill(code)
         await page.locator("#setup-bind").click()

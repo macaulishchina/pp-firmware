@@ -60,6 +60,21 @@ test('menus stay bounded and maintenance is explicitly below settings', () => {
   assert.ok(m.menus.some(item => item.id === 'back'));
 });
 
+test('returning from a detail restores the parent selection', () => {
+  const m = new PassportModel();
+  m.openView('menu');
+  m.menuIndex = 3;
+  m.openView('settings');
+  m.menuIndex = 1;
+  m.openView('status');
+  m.openView('settings', true);
+  assert.equal(m.menus[m.menuIndex].id, 'status');
+  m.openView('menu', true);
+  assert.equal(m.menus[m.menuIndex].id, 'settings');
+  m.openView('settings');
+  assert.equal(m.menus[m.menuIndex].id, 'keep');
+});
+
 test('failed recognition dispatches nothing and allows fresh recording', () => {
   const m = new PassportModel(); m.failNext = true;
   assert.equal(submit(m), null);

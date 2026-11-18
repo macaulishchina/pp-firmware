@@ -1,0 +1,769 @@
+From f4ebd0499237e21cd03c6f6dad4f906a708068cb Mon Sep 17 00:00:00 2001
+From: huyidong <huyidongchina@gmail.com>
+Date: Wed, 18 Nov 2026 12:39:40 +0000
+Subject: [PATCH] Fix Passport Wi-Fi, TCP delivery and button sampling
+
+---
+ crates/pemu-core/src/snap.rs                  |   8 +-
+ crates/pemu-hle/tests/corpus_image_symbols.rs |   2 +-
+ crates/pemu-machine/src/apply.rs              |   1 +
+ crates/pemu-machine/src/machine/input.rs      |  11 +-
+ crates/pemu-machine/src/machine/rom_tests.rs  |  21 ++
+ crates/pemu-radio/src/lan/gateway.rs          | 222 ++++++++++++++++--
+ crates/pemu-radio/src/wifi/driver.rs          |  79 ++++++-
+ crates/pemu-radio/src/wifi/profile.rs         |   9 +-
+ specs/hle/idf-5.5.3/wifi.toml                 |  13 +
+ 9 files changed, 328 insertions(+), 38 deletions(-)
+
+diff --git a/crates/pemu-core/src/snap.rs b/crates/pemu-core/src/snap.rs
+index 47f3bfa..057072b 100644
+--- a/crates/pemu-core/src/snap.rs
++++ b/crates/pemu-core/src/snap.rs
+@@ -22,7 +22,7 @@ pub const MAGIC: [u8; 8] = *b"PEMUSNAP";
+ /// Version of the container framing. Also bumped when a machine revision makes the previous
+ /// revision's snapshots unrestorable as a whole (`pemu-machine` writes all its sections at one
+ /// `SECTION_VERSION`), so the refusal is `UnsupportedFormat`, not a missing or short section.
+-pub const FORMAT_VERSION: u16 = 28;
++pub const FORMAT_VERSION: u16 = 29;
+
+ /// blake3 of a stored snapshot stream, so a host finds a damaged file before parsing it. Not a
+ /// run identity: see [`Snapshot::canonical_hash`].
+@@ -1959,11 +1959,11 @@ mod tests {
+     /// Each older format changed a section layout without a section version bump, so the whole
+     /// container is refused rather than misdecoded.
+     #[test]
+-    fn a_format_5_through_27_container_is_refused() {
+-        assert_eq!(FORMAT_VERSION, 28);
++    fn a_format_5_through_28_container_is_refused() {
++        assert_eq!(FORMAT_VERSION, 29);
+         for older in [
+             5u16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+-            27,
++            27, 28,
+         ] {
+             let mut bytes = sample_snapshot().to_bytes().expect("writes");
+             bytes[MAGIC.len()..MAGIC.len() + 2].copy_from_slice(&older.to_le_bytes());
+diff --git a/crates/pemu-hle/tests/corpus_image_symbols.rs b/crates/pemu-hle/tests/corpus_image_symbols.rs
+index d19ccf5..2f9c7d6 100644
+--- a/crates/pemu-hle/tests/corpus_image_symbols.rs
++++ b/crates/pemu-hle/tests/corpus_image_symbols.rs
+@@ -671,7 +671,7 @@ fn profile_guards(file: &str) -> Vec<(String, String)> {
+ #[test]
+ fn the_first_call_of_every_guarded_hook_reaches_its_guard() {
+     let guards = profile_guards("wifi.toml");
+-    assert_eq!(guards.len(), 16, "the guarded rows of wifi.toml");
++    assert_eq!(guards.len(), 17, "the guarded rows of wifi.toml");
+     let blob = pemu_hle::tripwire::blob_defined_set();
+     for (id, flash, elf_bytes) in &builds() {
+         let elf = ElfInfo::parse(elf_bytes).expect("the ELF parses");
+diff --git a/crates/pemu-machine/src/apply.rs b/crates/pemu-machine/src/apply.rs
+index b829442..248167c 100644
+--- a/crates/pemu-machine/src/apply.rs
++++ b/crates/pemu-machine/src/apply.rs
+@@ -285,6 +285,7 @@ impl Machine {
+         } else {
+             0
+         };
++        self.sample_ladder_gpio();
+
+         // 5. State outside the models: MMU windows, PMP permissions, the stack monitor the reset
+         // guard now holds, and the USJ link a block reset dropped.
+diff --git a/crates/pemu-machine/src/machine/input.rs b/crates/pemu-machine/src/machine/input.rs
+index 0424224..00089fb 100644
+--- a/crates/pemu-machine/src/machine/input.rs
++++ b/crates/pemu-machine/src/machine/input.rs
+@@ -10,7 +10,7 @@ use pemu_core::reset::{ResetCause, ResetKind};
+ use pemu_core::sched::{EventKey, Owner};
+ use pemu_core::snap::SnapValue;
+ use pemu_soc_c3::periph::i2s0::Dir;
+-use pemu_soc_c3::wiring::usj as usj_wiring;
++use pemu_soc_c3::wiring::{gpio as gpio_wiring, usj as usj_wiring};
+
+ use super::Machine;
+ use crate::hle::{HleHciInput, HleNetInput};
+@@ -130,6 +130,9 @@ impl Machine {
+             let mut cx = BoardCx::new(entry.at);
+             let effect = self.board.apply_input(entry.at, &entry.ev, &mut cx);
+             self.drain_board_cx(&mut cx);
++            if matches!(entry.ev, InputEvent::Button { .. }) {
++                self.sample_ladder_gpio();
++            }
+             if matches!(
+                 entry.ev,
+                 InputEvent::UsbCable { .. } | InputEvent::UsbClient { .. }
+@@ -140,6 +143,12 @@ impl Machine {
+         }
+     }
+
++    pub(crate) fn sample_ladder_gpio(&mut self) {
++        let now = self.now();
++        let pin = self.board.ladder.config().gpio;
++        gpio_wiring::sample_inputs(&mut self.soc.devices.gpio, &self.board, now, 1 << pin);
++    }
++
+     /// Acts on what a board input or chip event reports: a rail edge to OFF or a brownout powers
+     /// the MCU down, a reset latches its strap and is sequenced. A card tap result is counted in
+     /// [`Machine::pending_board_effects`] (the `nfc.tap` command reads it).
+diff --git a/crates/pemu-machine/src/machine/rom_tests.rs b/crates/pemu-machine/src/machine/rom_tests.rs
+index c2bbe4f..2201049 100644
+--- a/crates/pemu-machine/src/machine/rom_tests.rs
++++ b/crates/pemu-machine/src/machine/rom_tests.rs
+@@ -1531,6 +1531,27 @@ fn power_on_reaches_every_block_and_republishes_the_pins_it_dropped() {
+     );
+ }
+
++#[test]
++fn the_ladder_drives_digital_gpio_during_input_and_reset() {
++    use pemu_core::input::ButtonId;
++
++    let mut m = machine();
++    let mask = 1 << m.board.ladder.config().gpio;
++    assert_ne!(m.soc.devices.gpio.in_levels() & mask, 0, "released after power-on");
++
++    m.input(At::Now, InputEvent::Button { id: ButtonId::Ok, down: true })
++        .expect("journaled press");
++    m.apply_due_journal();
++    assert_eq!(m.soc.devices.gpio.in_levels() & mask, 0, "held");
++    m.power_on();
++    assert_eq!(m.soc.devices.gpio.in_levels() & mask, 0, "held across reset");
++
++    m.input(At::Now, InputEvent::Button { id: ButtonId::Ok, down: false })
++        .expect("journaled release");
++    m.apply_due_journal();
++    assert_ne!(m.soc.devices.gpio.in_levels() & mask, 0, "released");
++}
++
+ #[test]
+ fn an_origin_carrying_input_raises_the_receipt_class() {
+     use pemu_core::journal::Determinism;
+diff --git a/crates/pemu-radio/src/lan/gateway.rs b/crates/pemu-radio/src/lan/gateway.rs
+index a38ec82..787d392 100644
+--- a/crates/pemu-radio/src/lan/gateway.rs
++++ b/crates/pemu-radio/src/lan/gateway.rs
+@@ -35,6 +35,8 @@ pub const GATEWAY_MSS: u16 = 1_460;
+ /// The gateway consumes every segment at once, so this only bounds how far the guest sends
+ /// ahead of an acknowledgement (class C).
+ pub const GATEWAY_WINDOW: u16 = 8_192;
++const TCP_RETRY_US: u64 = 1_000_000;
++const TCP_MAX_RETRIES: u8 = 6;
+ /// The MSS RFC 9293 section 3.7.1 assumes for a peer that announced none.
+ pub const DEFAULT_MSS: u16 = 536;
+ /// Deterministic, plus [`ISN_STEP`] per connection, rather than the unpredictable ISN RFC 6528
+@@ -79,6 +81,10 @@ pub struct TcpConn {
+     pub peer_mss: u16,
+     pub request: Vec<u8>,
+     pub response: Vec<u8>,
++    /// Sequence number of the first buffered response byte.
++    pub response_seq: u32,
++    pub retry_at_us: u64,
++    pub retries: u8,
+     pub answered: bool,
+     pub fin_received: bool,
+     pub fin_sent: bool,
+@@ -103,6 +109,9 @@ snap_struct!(TcpConn {
+     peer_mss,
+     request,
+     response,
++    response_seq,
++    retry_at_us,
++    retries,
+     answered,
+     fin_received,
+     fin_sent,
+@@ -161,6 +170,8 @@ pub struct Lan {
+     pub first_ack_us: u64,
+     pub counters: LanCounters,
+     pub bridge: Bridge,
++    /// The already scheduled radio timer, which may fire early after ACK progress.
++    pub tcp_timer_us: u64,
+ }
+
+ snap_struct!(Lan {
+@@ -170,7 +181,8 @@ snap_struct!(Lan {
+     ip_id,
+     first_ack_us,
+     counters,
+-    bridge
++    bridge,
++    tcp_timer_us
+ });
+
+ fn ip(a: [u8; 4]) -> Ipv4Address {
+@@ -307,7 +319,7 @@ impl Lan {
+                     &bytes,
+                 )])
+             }
+-            IpProtocol::Tcp if to_gateway => self.tcp(src_mac, src, body),
++            IpProtocol::Tcp if to_gateway => self.tcp(now_us, src_mac, src, body),
+             _ => None,
+         }
+     }
+@@ -463,10 +475,15 @@ impl Lan {
+
+     /// The TCP server half (RFC 9293). A SYN to a service port gets a SYN-ACK; a segment for no
+     /// connection gets a RST. The answer goes out within the peer's MSS and window as it
+-    /// acknowledges. The server never closes first (HTTP/1.1 keeps the connection). The link is
+-    /// lossless, so nothing is retransmitted; a frame the guest's RX capacity drops is recovered by
+-    /// the guest's own retransmission.
+-    fn tcp(&mut self, src_mac: [u8; 6], src: [u8; 4], body: &[u8]) -> Option<Vec<Vec<u8>>> {
++    /// acknowledges. The guest can drop a received frame, so the oldest unacknowledged bytes
++    /// remain buffered until acknowledged and are retransmitted on a virtual-time deadline.
++    fn tcp(
++        &mut self,
++        now_us: u64,
++        src_mac: [u8; 6],
++        src: [u8; 4],
++        body: &[u8],
++    ) -> Option<Vec<Vec<u8>>> {
+         let caps = ChecksumCapabilities::default();
+         let packet = TcpPacket::new_checked(body).ok()?;
+         let seg = TcpRepr::parse(
+@@ -512,15 +529,25 @@ impl Lan {
+             let ack = ack.0 as u32;
+             let in_flight = conn.snd_nxt.wrapping_sub(conn.snd_una);
+             let acked = ack.wrapping_sub(conn.snd_una);
+-            if acked <= in_flight {
++            if acked != 0 && acked <= in_flight {
+                 conn.snd_una = ack;
++                conn.retries = 0;
++                conn.retry_at_us = 0;
++                if conn.state == tcp_state::SYN_RECEIVED {
++                    conn.state = tcp_state::ESTABLISHED;
++                }
++                let bytes = (ack.wrapping_sub(conn.response_seq) as usize).min(conn.response.len());
++                // Compact in batches for busy streams and release the last acknowledged bytes.
++                if bytes >= usize::from(GATEWAY_WINDOW) || bytes == conn.response.len() {
++                    conn.response.drain(..bytes);
++                    conn.response_seq = conn.response_seq.wrapping_add(bytes as u32);
++                }
+             }
+-            if conn.state == tcp_state::SYN_RECEIVED && ack == conn.iss.wrapping_add(1) {
+-                conn.state = tcp_state::ESTABLISHED;
++            if acked <= in_flight {
++                conn.peer_window = seg.window_len;
+             }
+         }
+-        conn.peer_window = seg.window_len;
+-        let mut need_ack = false;
++        let mut need_ack = seg.control == TcpControl::Fin;
+         if !seg.payload.is_empty() {
+             need_ack = true;
+             if seq == conn.rcv_nxt && !conn.fin_received {
+@@ -549,7 +576,6 @@ impl Lan {
+         {
+             conn.fin_received = true;
+             conn.rcv_nxt = conn.rcv_nxt.wrapping_add(1);
+-            need_ack = true;
+             if conn.stream != 0 && !conn.host_closed {
+                 // WISP has no half-close: the guest's FIN closes the stream.
+                 self.bridge.counters.closed_by_guest += 1;
+@@ -567,7 +593,7 @@ impl Lan {
+             conn.answered = true;
+             self.counters.http_answers += 1;
+         }
+-        if self.flush(&mut conn, &mut out) {
++        if self.flush(&mut conn, now_us, &mut out) {
+             need_ack = false;
+         }
+         if need_ack {
+@@ -583,8 +609,8 @@ impl Lan {
+     /// Sends what the peer's window allows of the answer, then the gateway's FIN once the answer is
+     /// all out and either side has closed. Returns whether anything was sent (which acknowledges
+     /// everything received).
+-    fn flush(&mut self, conn: &mut TcpConn, out: &mut Vec<Vec<u8>>) -> bool {
+-        let sent_so_far = |c: &TcpConn| c.snd_nxt.wrapping_sub(c.iss.wrapping_add(1)) as usize;
++    fn flush(&mut self, conn: &mut TcpConn, now_us: u64, out: &mut Vec<Vec<u8>>) -> bool {
++        let sent_so_far = |c: &TcpConn| c.snd_nxt.wrapping_sub(c.response_seq) as usize;
+         if conn.state == tcp_state::SYN_PENDING || conn.state == tcp_state::SYN_RECEIVED {
+             return false;
+         }
+@@ -608,16 +634,84 @@ impl Lan {
+             sent = true;
+         }
+         let closing = conn.fin_received || (conn.stream != 0 && conn.host_closed);
+-        if closing && !conn.fin_sent && sent_so_far(conn) >= conn.response.len() {
++        if closing && !conn.fin_sent && sent_so_far(conn) >= conn.response.len()
++            && conn.snd_nxt.wrapping_sub(conn.snd_una) < u32::from(conn.peer_window)
++        {
+             out.push(self.segment(conn, conn.snd_nxt, TcpControl::Fin, &[]));
+             conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
+             conn.fin_sent = true;
+             conn.state = tcp_state::LAST_ACK;
+             sent = true;
+         }
++        let pending = conn.snd_una != conn.snd_nxt || sent_so_far(conn) < conn.response.len()
++            || (closing && !conn.fin_sent);
++        if pending && conn.retry_at_us == 0 {
++            conn.retry_at_us = now_us.saturating_add(TCP_RETRY_US);
++        }
+         sent
+     }
+
++    /// At most one timer is needed. A deadline moved earlier by a new connection may leave
++    /// a later callback in the scheduler. Only the oldest tracked callback does work.
++    pub fn arm_tcp_timer(&mut self) -> Option<u64> {
++        let next = self.tcp.iter().map(|c| c.retry_at_us).filter(|&at| at != 0).min()?;
++        if self.tcp_timer_us != 0 && self.tcp_timer_us <= next {
++            return None;
++        }
++        self.tcp_timer_us = next;
++        Some(next)
++    }
++
++    pub fn tcp_timer(&mut self, now_us: u64) -> Vec<Vec<u8>> {
++        if self.tcp_timer_us == 0 || self.tcp_timer_us > now_us {
++            return Vec::new();
++        }
++        self.tcp_timer_us = 0;
++        let mut out = Vec::new();
++        for mut conn in std::mem::take(&mut self.tcp) {
++            if conn.retry_at_us != 0 && conn.retry_at_us <= now_us {
++                if conn.retries >= TCP_MAX_RETRIES {
++                    if conn.stream != 0 && !conn.host_closed {
++                        self.bridge
++                            .push(bridge::close(conn.stream, bridge::reason::NETWORK));
++                    }
++                    self.counters.tcp_resets += 1;
++                    // The peer expects the first byte it hasn't acknowledged.
++                    out.push(self.segment(&conn, conn.snd_una, TcpControl::Rst, &[]));
++                    continue;
++                }
++                self.retry_segment(&mut conn, &mut out);
++                conn.retries += 1;
++                conn.retry_at_us = now_us.saturating_add(TCP_RETRY_US << conn.retries.min(3));
++            }
++            self.tcp.push(conn);
++        }
++        self.counters.frames_out += out.len() as u64;
++        out
++    }
++
++    fn retry_segment(&mut self, conn: &mut TcpConn, out: &mut Vec<Vec<u8>>) {
++        let seq = conn.snd_una;
++        let offset = seq.wrapping_sub(conn.response_seq) as usize;
++        let in_flight = conn.snd_nxt.wrapping_sub(seq) as usize;
++        if let Some(remaining) = conn.response.get(offset..).filter(|bytes| !bytes.is_empty()) {
++            // Probe a zero window with one byte if there are no outstanding bytes. If the
++            // window update was lost, the peer can accept it. Otherwise it ACKs the same seq.
++            let len = remaining.len().min(in_flight.max(1)).min(usize::from(conn.peer_mss));
++            out.push(self.segment(conn, seq, TcpControl::Psh, &remaining[..len]));
++            if in_flight == 0 {
++                conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
++            }
++        } else {
++            out.push(self.segment(conn, seq, TcpControl::Fin, &[]));
++            if !conn.fin_sent {
++                conn.fin_sent = true;
++                conn.state = tcp_state::LAST_ACK;
++                conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
++            }
++        }
++    }
++
+     fn reset(&mut self, conn: &TcpConn) -> Vec<u8> {
+         self.segment(conn, conn.snd_nxt, TcpControl::Rst, &[])
+     }
+@@ -646,7 +740,7 @@ impl Lan {
+         out
+     }
+
+-    pub fn bridge_packet(&mut self, seq: u64, packet: &[u8]) -> Vec<Vec<u8>> {
++    pub fn bridge_packet(&mut self, now_us: u64, seq: u64, packet: &[u8]) -> Vec<Vec<u8>> {
+         self.bridge.take_seq(seq);
+         let Some((kind, stream, payload)) = bridge::decode(packet) else {
+             self.bridge.counters.stray += 1;
+@@ -700,7 +794,7 @@ impl Lan {
+             }
+             _ => self.bridge.counters.stray += 1,
+         }
+-        self.flush(&mut conn, &mut out);
++        self.flush(&mut conn, now_us, &mut out);
+         let closed = conn.fin_sent && conn.fin_received && conn.snd_una == conn.snd_nxt;
+         if !closed {
+             self.tcp.insert(at, conn);
+@@ -736,6 +830,7 @@ impl Lan {
+                 iss,
+                 snd_una: iss,
+                 snd_nxt: iss.wrapping_add(1),
++                response_seq: iss.wrapping_add(1),
+                 rcv_nxt: (seg.seq_number.0 as u32).wrapping_add(1),
+                 peer_window: seg.window_len,
+                 peer_mss: seg
+@@ -1299,7 +1394,7 @@ mod tests {
+             port: 80,
+             host_port: 18_080,
+         }]);
+-        assert!(lan.bridge_packet(0, &bridge::continue_(0, 64)).is_empty());
++        assert!(lan.bridge_packet(0, 0, &bridge::continue_(0, 64)).is_empty());
+         assert_eq!(lan.bridge.credit0, 64);
+         lan
+     }
+@@ -1341,7 +1436,7 @@ mod tests {
+         assert!(c.send(&mut lan, TcpControl::Syn, &[], 80).is_empty());
+         assert!(sent(&lan, &mut cursor).is_empty());
+
+-        let synack = lan.bridge_packet(1, &bridge::continue_(stream, 2));
++        let synack = lan.bridge_packet(0, 1, &bridge::continue_(stream, 2));
+         assert_eq!(synack.len(), 1);
+         assert_eq!(c.take(&synack[0]).0, TcpControl::Syn);
+         assert!(c.send(&mut lan, TcpControl::None, &[], 80).is_empty());
+@@ -1357,13 +1452,13 @@ mod tests {
+         );
+
+         let body = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi";
+-        let data = lan.bridge_packet(2, &bridge::encode(bridge::kind::DATA, stream, body));
++        let data = lan.bridge_packet(0, 2, &bridge::encode(bridge::kind::DATA, stream, body));
+         let mut got = Vec::new();
+         for f in &data {
+             got.extend(c.take(f).1);
+         }
+         assert_eq!(got, body);
+-        let fin = lan.bridge_packet(3, &bridge::close(stream, bridge::reason::VOLUNTARY));
++        let fin = lan.bridge_packet(0, 3, &bridge::close(stream, bridge::reason::VOLUNTARY));
+         assert_eq!(fin.len(), 1);
+         assert_eq!(c.take(&fin[0]).0, TcpControl::Fin);
+         c.send(&mut lan, TcpControl::None, &[], 80);
+@@ -1389,12 +1484,87 @@ mod tests {
+         };
+         c.send(&mut lan, TcpControl::Syn, &[], 80);
+         let stream = lan.tcp[0].stream;
+-        let rst = lan.bridge_packet(1, &bridge::close(stream, bridge::reason::REFUSED));
++        let rst = lan.bridge_packet(0, 1, &bridge::close(stream, bridge::reason::REFUSED));
+         assert_eq!(c.take(&rst[0]).0, TcpControl::Rst);
+         assert!(lan.tcp.is_empty());
+         assert_eq!(lan.bridge.counters.refused, 1);
+     }
+
++    #[test]
++    fn the_gateway_recovers_a_lost_response_and_fin_without_replaying_the_request() {
++        let mut lan = bridged_lan();
++        let mut cursor = 0;
++        let mut client = Client {
++            seq: 100,
++            ack: 0,
++            port: 49_204,
++        };
++        client.send(&mut lan, TcpControl::Syn, &[], 80);
++        let stream = lan.tcp[0].stream;
++        let synack = lan.bridge_packet(0, 1, &bridge::continue_(stream, 8));
++        client.take(&synack[0]);
++        client.send(&mut lan, TcpControl::Psh, GET, 80);
++        assert_eq!(sent(&lan, &mut cursor).len(), 2);
++
++        let body = vec![b'x'; 2_000];
++        let response = lan.bridge_packet(0, 2, &bridge::encode(bridge::kind::DATA, stream, &body));
++        assert_eq!(response.len(), 2);
++        let first = client.ack;
++        client.take(&response[1]); // The client refuses the second segment across the gap.
++        assert_eq!(client.ack, first);
++        assert_eq!(lan.arm_tcp_timer(), Some(TCP_RETRY_US));
++        assert!(lan.tcp_timer(TCP_RETRY_US - 1).is_empty());
++        let retry = lan.tcp_timer(TCP_RETRY_US);
++        let mut received = client.take(&retry[0]).1;
++        assert_eq!(client.ack, first.wrapping_add(1_440));
++        received.extend(client.take(&response[1]).1);
++        assert_eq!(received, body);
++        client.send(&mut lan, TcpControl::None, &[], 80);
++        assert!(lan.tcp[0].response.is_empty());
++        assert_eq!(lan.arm_tcp_timer(), None);
++
++        let now = 2 * TCP_RETRY_US;
++        let fin = lan.bridge_packet(now, 3, &bridge::close(stream, bridge::reason::VOLUNTARY));
++        assert_eq!(fin.len(), 1);
++        assert_eq!(lan.arm_tcp_timer(), Some(now + TCP_RETRY_US));
++        let retry = lan.tcp_timer(now + TCP_RETRY_US);
++        assert_eq!(client.take(&retry[0]).0, TcpControl::Fin);
++        assert_eq!(client.ack, first.wrapping_add(body.len() as u32 + 1));
++        client.send(&mut lan, TcpControl::Fin, &[], 80);
++        assert!(lan.tcp.is_empty());
++        assert!(sent(&lan, &mut cursor).is_empty());
++    }
++
++    #[test]
++    fn stalled_downstream_closes_the_stream_after_bounded_retries() {
++        let mut lan = bridged_lan();
++        let mut cursor = 0;
++        let mut client = Client {
++            seq: 200,
++            ack: 0,
++            port: 49_205,
++        };
++        client.send(&mut lan, TcpControl::Syn, &[], 80);
++        let stream = lan.tcp[0].stream;
++        client.take(&lan.bridge_packet(0, 1, &bridge::continue_(stream, 2))[0]);
++        client.send(&mut lan, TcpControl::None, &[], 80);
++        sent(&lan, &mut cursor);
++        lan.bridge_packet(0, 2, &bridge::encode(bridge::kind::DATA, stream, b"pending"));
++        for _ in 0..TCP_MAX_RETRIES {
++            let due = lan.arm_tcp_timer().unwrap();
++            assert_eq!(lan.tcp_timer(due).len(), 1);
++        }
++        let due = lan.arm_tcp_timer().unwrap();
++        let out = lan.tcp_timer(due);
++        assert_eq!(client.take(&out[0]).0, TcpControl::Rst);
++        assert_eq!(lan.arm_tcp_timer(), None);
++        assert!(lan.tcp.is_empty());
++        assert_eq!(
++            sent(&lan, &mut cursor),
++            vec![(bridge::kind::CLOSE, stream, vec![bridge::reason::NETWORK])]
++        );
++    }
++
+     /// WISP v1 credit is counted in packets; the guest's retransmission goes out once a `CONTINUE`
+     /// restores it.
+     #[test]
+@@ -1408,7 +1578,7 @@ mod tests {
+         };
+         c.send(&mut lan, TcpControl::Syn, &[], 80);
+         let stream = lan.tcp[0].stream;
+-        let s = lan.bridge_packet(1, &bridge::continue_(stream, 0));
++        let s = lan.bridge_packet(0, 1, &bridge::continue_(stream, 0));
+         c.take(&s[0]);
+         c.send(&mut lan, TcpControl::None, &[], 80);
+         sent(&lan, &mut cursor);
+@@ -1416,7 +1586,7 @@ mod tests {
+         c.send(&mut lan, TcpControl::Psh, b"x", 80);
+         assert!(sent(&lan, &mut cursor).is_empty(), "held");
+         assert_eq!(lan.bridge.counters.held, 1);
+-        lan.bridge_packet(2, &bridge::continue_(stream, 1));
++        lan.bridge_packet(0, 2, &bridge::continue_(stream, 1));
+         c.seq = before;
+         c.send(&mut lan, TcpControl::Psh, b"x", 80);
+         assert_eq!(
+@@ -1437,7 +1607,7 @@ mod tests {
+         };
+         c.send(&mut lan, TcpControl::Syn, &[], 80);
+         let stream = lan.tcp[0].stream;
+-        let s = lan.bridge_packet(1, &bridge::continue_(stream, 8));
++        let s = lan.bridge_packet(0, 1, &bridge::continue_(stream, 8));
+         c.take(&s[0]);
+         sent(&lan, &mut cursor);
+         let rsts = lan.bridge_detach();
+diff --git a/crates/pemu-radio/src/wifi/driver.rs b/crates/pemu-radio/src/wifi/driver.rs
+index 95bf1e4..cc527bd 100644
+--- a/crates/pemu-radio/src/wifi/driver.rs
++++ b/crates/pemu-radio/src/wifi/driver.rs
+@@ -48,6 +48,7 @@ pub const ESP_ERR_WIFI_IF: u32 = 0x3004;
+ pub const ESP_ERR_WIFI_CONN: u32 = 0x3007;
+ /// 12309: the `esp_wifi_internal_tx` answer for a started station that is not associated.
+ pub const ESP_ERR_WIFI_NOT_ASSOC: u32 = 0x3015;
++const ESP_ERR_WIFI_NOT_CONNECT: u32 = 0x300f;
+ /// `WIFI_MODE_STA`.
+ pub const MODE_STA: u32 = 1;
+ /// `WIFI_MODE_AP`; it and `WIFI_MODE_APSTA` create the SoftAP interface.
+@@ -79,6 +80,7 @@ mod timer {
+     pub const SCAN: u16 = 1;
+     /// The instant an outstanding `esp_wifi_connect` attempt resolves.
+     pub const CONNECT: u16 = 2;
++    pub const TCP: u16 = 3;
+ }
+
+ mod work {
+@@ -116,6 +118,7 @@ pub mod handler {
+     pub const TX: u16 = 19;
+     /// `esp_wifi_internal_set_sta_ip`, which `esp_netif`'s `GOT_IP` handler calls.
+     pub const SET_STA_IP: u16 = 20;
++    pub const STA_GET_AP_INFO: u16 = 21;
+ }
+
+ /// `GOT_IP` is deliberately not a driver state: the address comes from lwIP's DHCP client over
+@@ -421,6 +424,7 @@ fn handler_name(kind: HandlerKind) -> Option<&'static str> {
+         handler::DISCONNECT => "wifi.disconnect",
+         handler::TX => "wifi.tx",
+         handler::SET_STA_IP => "wifi.set_sta_ip",
++        handler::STA_GET_AP_INFO => "wifi.sta_get_ap_info",
+         _ if kind == worker_handler(MagicKind::WifiWorker) => "wifi.worker",
+         _ => return None,
+     })
+@@ -548,6 +552,12 @@ impl WifiHost {
+         g.schedule(VTime::from_us(at), module_timer(self.module, tag));
+     }
+
++    fn arm_tcp(&self, st: &mut WifiState, g: &mut dyn GuestView) {
++        if let Some(at) = st.lan.arm_tcp_timer() {
++            self.arm(g, at, timer::TCP);
++        }
++    }
++
+     fn timestamp_call(&self) -> HleAction {
+         hle_common::timestamp_call(&self.synth, "wifi")
+     }
+@@ -1169,6 +1179,23 @@ impl WifiHost {
+                     Err(_) => hle_common::fault("wifi", "wifi_config_t", a1),
+                 }
+             }
++            handler::STA_GET_AP_INFO => {
++                if a0 == 0 {
++                    return ret(ESP_ERR_INVALID_ARG);
++                }
++                if st.mode & MODE_STA == 0 {
++                    return ret(ESP_ERR_WIFI_CONN);
++                }
++                let Some(ap) = st.peer.as_ref().filter(|_| st.state == DriverState::Connected) else {
++                    return ret(ESP_ERR_WIFI_NOT_CONNECT);
++                };
++                let mut bytes = vec![0u8; self.profile.driver.ap_record_bytes as usize];
++                super::ap::write_record(ap, &mut bytes);
++                match g.write(a0, &bytes) {
++                    Ok(()) => ret(ESP_OK),
++                    Err(_) => hle_common::fault("wifi", "the station AP record", a0),
++                }
++            }
+             handler::GET_MAC => {
+                 if a0 > MAX_IF {
+                     return ret(ESP_ERR_WIFI_IF);
+@@ -1828,6 +1855,7 @@ impl WifiHost {
+         for answer in st.lan.input(now, &frame) {
+             self.receive_frame(st, g, 0, &answer);
+         }
++        self.arm_tcp(st, g);
+         ret(ESP_OK)
+     }
+
+@@ -1877,6 +1905,7 @@ impl WifiHost {
+             "wifi.disconnect" => self.disconnect(&mut st, &mut words, g, &resume),
+             "wifi.tx" => self.tx(&mut st, g),
+             "wifi.set_sta_ip" => self.set_sta_ip(&mut st, g),
++            "wifi.sta_get_ap_info" => self.immediate(handler::STA_GET_AP_INFO, &mut st, g),
+             other => HleAction::Fail(HleError::new(
+                 HleErrorKind::Handler,
+                 format!("the wifi module has no handler `{other}`"),
+@@ -2021,6 +2050,12 @@ impl ModuleHost for WifiHost {
+         if tag == timer::CONNECT {
+             self.finish_connect(&mut st, g, now);
+         }
++        if tag == timer::TCP {
++            for frame in st.lan.tcp_timer(now) {
++                self.receive_frame(&mut st, g, 0, &frame);
++            }
++            self.arm_tcp(&mut st, g);
++        }
+         let (due, later): (Vec<Outgoing>, Vec<Outgoing>) =
+             st.outbox.drain(..).partition(|o| o.due_us <= now);
+         st.outbox = later;
+@@ -2087,11 +2122,12 @@ impl ModuleHost for WifiHost {
+                 Vec::new()
+             }
+             NetInput::Detach => st.lan.bridge_detach(),
+-            NetInput::Packet { seq, data } => st.lan.bridge_packet(seq, data),
++            NetInput::Packet { seq, data } => st.lan.bridge_packet(g.now().as_us(), seq, data),
+         };
+         for frame in frames {
+             self.receive_frame(&mut st, g, 0, &frame);
+         }
++        self.arm_tcp(&mut st, g);
+         *state = st.encode();
+         Ok(Vec::new())
+     }
+@@ -3551,6 +3587,47 @@ mod tests {
+         at
+     }
+
++    #[test]
++    fn station_ap_info_reports_only_the_associated_peer() {
++        let mut h = host();
++        h.workers(WakeMode::U5Polling);
++        let mut g = Guest::default();
++        g.write(EVENT_BASE_AT, &EVENT_BASE.to_le_bytes()).unwrap();
++        let mut st = Vec::new();
++        run_to_associated(&mut h, &mut st, &mut g);
++        assert_eq!(
++            run_immediate(&mut h, &mut st, &mut g, handler::SET_MODE, [MODE_STA, 0]),
++            ESP_OK
++        );
++        set_air(&mut st, vec![ap("New-AP", -20, 6, 0)]);
++
++        let query = handler::STA_GET_AP_INFO;
++        let output = EVENT_BASE_AT + 0x100;
++        assert_eq!(
++            run_immediate(&mut h, &mut st, &mut g, query, [output, 0]),
++            ESP_OK
++        );
++        let mut record = vec![0; WifiProfile::load().driver.ap_record_bytes as usize];
++        g.read(output, &mut record).unwrap();
++        assert_eq!(&record[..6], &wpa2_ap().bssid);
++        assert_eq!(&record[6..15], b"Lab-WPA2\0");
++        assert_eq!(record[39], 1);
++        assert_eq!(record[44] as i8, -37);
++
++        assert_eq!(
++            run_immediate(&mut h, &mut st, &mut g, query, [0, 0]),
++            ESP_ERR_INVALID_ARG
++        );
++        let mut disconnected = WifiState::decode(&st).unwrap();
++        disconnected.state = DriverState::Started;
++        disconnected.peer = None;
++        st = disconnected.encode();
++        assert_eq!(
++            run_immediate(&mut h, &mut st, &mut g, query, [output, 0]),
++            ESP_ERR_WIFI_NOT_CONNECT
++        );
++    }
++
+     /// Returns 0 at once and associates 212,415 us later with one `STA_CONNECTED` carrying a whole
+     /// 48-byte `wifi_event_sta_connected_t`.
+     #[test]
+diff --git a/crates/pemu-radio/src/wifi/profile.rs b/crates/pemu-radio/src/wifi/profile.rs
+index e32c436..dc68869 100644
+--- a/crates/pemu-radio/src/wifi/profile.rs
++++ b/crates/pemu-radio/src/wifi/profile.rs
+@@ -348,7 +348,7 @@ mod tests {
+         let p = WifiProfile::load();
+         assert_eq!(p.idf, "5.5.3");
+         assert_eq!(p.module, "wifi");
+-        assert_eq!(p.hooks.len(), 21);
++        assert_eq!(p.hooks.len(), 22);
+         assert_eq!(p.hook(0).map(|h| h.name.as_str()), Some("esp_wifi_init"));
+         assert_eq!(
+             p.hook(13).map(|h| h.name.as_str()),
+@@ -462,15 +462,14 @@ mod tests {
+
+     #[test]
+     fn every_corpus_build_that_links_a_hook_has_a_variant_of_its_own() {
+-        // `builds` names exactly the corpus builds that link Wi-Fi; `pk` and `pkgatt` link none.
+-        // `probe_wifi_http` is the one device probe measured into the profile.
++        // `builds` names measured images: the Wi-Fi corpus, the HTTP probe, and PA-Terminal.
+         let p = WifiProfile::load();
+         for hook in &p.hooks {
+             for variant in &hook.variants {
+                 assert!(
+                     variant.builds.split(',').all(|b| matches!(
+                         b,
+-                        "scan3" | "probe2" | "demo" | "official" | "probe_wifi_http"
++                        "scan3" | "probe2" | "demo" | "official" | "probe_wifi_http" | "pa_terminal"
+                     )),
+                     "hook `{}` names an unknown build in `{}`",
+                     hook.name,
+@@ -533,7 +532,7 @@ mod tests {
+                 .iter()
+                 .filter(|g| g.1 == "wifi_init_completed")
+                 .count(),
+-            15
++            16
+         );
+     }
+
+diff --git a/specs/hle/idf-5.5.3/wifi.toml b/specs/hle/idf-5.5.3/wifi.toml
+index fe78bf9..8e23ba1 100644
+--- a/specs/hle/idf-5.5.3/wifi.toml
++++ b/specs/hle/idf-5.5.3/wifi.toml
+@@ -168,6 +168,19 @@ builds = "scan3,probe2,demo,official,probe_wifi_http"
+ size = 94
+ code_sha256 = "e03e4ee427ad5828d8de9712f74247a6396ec4cd260fc337e8bea4438f80811d"
+
++# PA-Terminal links the station query to verify the SSID after DHCP and to show signal strength.
++# Its result reuses the scan record layout and the virtual LAN's associated peer.
++[[hook]]
++name = "esp_wifi_sta_get_ap_info"
++handler = 21
++section = ".flash.text"
++guard = "wifi_init_completed"
++
++[[variant]]
++builds = "pa_terminal"
++size = 98
++code_sha256 = "988d877d66e13c9d64a5db9a86cceac4f431625b5f59b3063e493ae4a952ce68"
++
+ [[hook]]
+ name = "esp_wifi_get_mac"
+ handler = 7

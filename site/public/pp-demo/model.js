@@ -43,6 +43,7 @@ export class PassportModel {
     this.newReply = false;
     this.page = 0;
     this.menuIndex = 0;
+    this.menuFocus = new Map();
     this.noticeIndex = 0;
     this.activeNotice = null;
     this.queue = [];
@@ -111,6 +112,12 @@ export class PassportModel {
       { id: 'settings', label: '设置', value: '' },
       { id: 'home', label: '返回主页', value: '' },
     ];
+  }
+  openView(view, restore = false) {
+    this.menuFocus.set(this.view, this.menuIndex);
+    this.view = view;
+    this.menuIndex = restore ? this.menuFocus.get(view) ?? 0 : 0;
+    this.page = 0;
   }
   home() {
     this.discardInput('返回主页，未发送输入已丢弃');

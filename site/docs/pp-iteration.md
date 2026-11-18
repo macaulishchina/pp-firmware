@@ -84,11 +84,12 @@ python3 tools/pp_lab.py sim session end SESSION_ID
 `--fault` 注入失败断言，用于验收失败证据。复跑默认执行原场景。
 `python3 tools/pp_lab.py sim attach-elf --version VERSION /path/to/pa_terminal.elf`
 登记同次构建的调试符号，工具会核对应用描述里的 ELF 哈希。
+设备的 `pp.status` 同时返回固件版本和 ELF SHA-256。PP Lab 只在构建指纹也吻合时确认设备使用了当前候选；历史固件缺少这一字段时只能报告其版本。
 
 ### 修复后的完整迭代
 
 ```sh
-# 在 PersonalAgent 中修复固件后，构建、私有预发布、虚拟安装并执行 16 步场景。
+# 在 PersonalAgent 中修复固件后，构建、私有预发布、虚拟安装并运行离线维护场景。
 python3 tools/pp_lab.py sim iterate --case offline-maintenance
 # 同一产物再次验证，直接复跑已有记录。
 python3 tools/pp_lab.py sim replay SIM_RUN

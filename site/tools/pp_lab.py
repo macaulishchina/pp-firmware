@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 import tomllib
+from zipfile import ZipFile
+
 import pp_sim
 
 SITE = Path(__file__).resolve().parents[1]
@@ -132,19 +134,25 @@ class Lab:
         asset_hash = digest(self.pa, assets)
         browser = digest(SITE, [p for p in site_files if is_under(p, Path("public/pp-demo"))
                                and p.name != "parity.json"] + [Path("tests/verify_passport_demo.py")])
-        integration = digest(self.pa, [p for p in pa_files
-                                        if str(p).startswith("src/assistant_runtime/") and not is_under(p, FIRMWARE)
-                                        or str(p).startswith("tests/test_passport_")
-                                        or p in (Path("tests/test_ai_passport.py"), Path("scripts/check_passport_hardware.py"))])
-        unit = evidence_signature(firmware, browser, digest(SITE, [Path("tests/passport-demo.test.mjs")]))
+        integration_host = digest(self.pa, [p for p in pa_files
+                                             if str(p).startswith("src/assistant_runtime/") and not is_under(p, FIRMWARE)
+                                             or str(p).startswith("tests/test_passport_")
+                                             or p in (Path("tests/test_ai_passport.py"),
+                                                      Path("tests/test_terminal_delivery.py"),
+                                                      Path("scripts/check_passport_hardware.py"))])
+        # The integration suite checks the pinned BSP files as well as the Python runtime.
+        integration = evidence_signature(firmware, integration_host)
+        unit = evidence_signature(firmware, browser, digest(SITE, [
+            Path("tests/passport-demo.test.mjs"), Path("tests/test_pp_lab.py"), Path("tools/pp_lab.py"),
+        ]))
         release_paths = [self.release_profile]
         if self.release_ca:
             release_paths.append(self.release_ca)
         return {"sync": evidence_signature(ui_hash, browser), "unit": unit, "integration": integration,
                 "demo": browser, "candidate": evidence_signature(firmware, digest(SITE, release_paths)),
-                "device": evidence_signature(self.version, digest(SITE, [Path("tools/pp_device_status.ps1")])),
+                "device": evidence_signature(self.version, firmware, digest(SITE, [Path("tools/pp_device_status.ps1")])),
                 "ui": ui_hash, "assets": asset_hash,
-                "revision": evidence_signature(firmware, browser, integration)[:16]}
+                "revision": evidence_signature(firmware, browser, integration_host)[:16]}
 
     def log(self, run, name, argv, cwd=SITE, timeout=90, env=None):
         with (run / f"{name}.log").open("ab") as output:
@@ -193,9 +201,22 @@ class Lab:
             raise ValueError("Unrecognized PP device status")
         detail = {"version": version, "paConnected": raw.get("connected") is True,
                   "cacheReady": raw.get("cache_ready") is True}
+        elf_digest = raw.get("elf_sha256")
+        if isinstance(elf_digest, str) and re.fullmatch(r"[0-9a-fA-F]{64}", elf_digest):
+            detail["elfSha256"] = elf_digest.lower()
+        if type(raw.get("wake_cause")) is int:
+            detail["wakeCause"] = raw["wake_cause"]
+        candidate = self.record["stages"].get("candidate", {})
+        candidate_hash = (candidate.get("detail") or {}).get("elfSha256")
         hint = "已读到设备状态"
         if version != self.version:
             hint += "，设备固件与当前候选版本不同"
+        elif not detail.get("elfSha256") or not candidate_hash or candidate.get("input") != self.inputs["candidate"]:
+            hint += "，缺少当前构建指纹，无法确认是否为同一镜像"
+        elif detail["elfSha256"] != candidate_hash:
+            hint += "，版本名相同但构建指纹不同"
+        else:
+            hint += "，构建指纹和当前候选一致"
         if not detail["paConnected"]:
             hint += "，采样时未连 PA"
         return "pass", hint + "。", detail
@@ -220,10 +241,12 @@ class Lab:
                      "pp-lab", self.args.sdk_root / "activate.sh", self.pa / FIRMWARE / "tests", host, sdk])
             self.log(run, name, ["node", "--test", "tests/passport-demo.test.mjs"])
             self.log(run, name, [self.python, "-m", "unittest", "discover", "-s",
-                                 self.pa / FIRMWARE / "tests", "-p", "test_package_firmware.py"])
+                                 self.pa / FIRMWARE / "tests", "-p", "test_*.py"])
+            self.log(run, name, [self.python, "-m", "unittest", "discover", "-s",
+                                 "tests", "-p", "test_pp_lab.py"])
         elif name == "integration":
             self.log(run, name, [self.python, "-m", "unittest", "test_ai_passport", "test_passport_protocol",
-                                 "test_passport_settings", "test_passport_hardware"],
+                                 "test_passport_settings", "test_passport_hardware", "test_terminal_delivery"],
                      cwd=self.pa, timeout=180, env={**os.environ, "PYTHONPATH": "src:tests"})
         elif name == "demo":
             self.log(run, name, [self.python, "tests/verify_passport_demo.py"], timeout=100)
@@ -237,13 +260,20 @@ class Lab:
                 raise ValueError("Built image does not contain the release PA URL")
             if self.release_ca and self.release_ca.read_bytes().rstrip() not in image:
                 raise ValueError("Built image does not contain the release CA certificate")
+            archive = run / f"pa-terminal-{self.version}.zip"
             self.log(run, name, [self.python, self.pa / FIRMWARE / "tools/package_firmware.py",
-                                 "--build", self.app / "build", "--output", run / f"pa-terminal-{self.version}.zip"])
+                                 "--build", self.app / "build", "--output", archive])
+            with ZipFile(archive) as package:
+                _, app_hash, flash = pp_sim.read_flash(package, self.version)
+                elf = pp_sim.pack(package, "debug/pa_terminal.elf", pp_sim.MAX_ELF)
+            return "pass", "已构建候选并生成私有刷写包。", {
+                "elfSha256": pp_sim.verify_elf(flash, elf),
+                "appSha256": app_hash,
+            }
         return "pass", {
             "unit": "固件 C、PP 交互演示状态与镜像打包检查通过。",
             "integration": "合成识别和播报走通真实 PA/Pi，覆盖配对、会话、任务及图片。",
             "demo": "浏览器场景和验收反馈入口检查通过。",
-            "candidate": "已构建候选并生成私有刷写包。",
         }[name], None
 
     def publish_status(self):

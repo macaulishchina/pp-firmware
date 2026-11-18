@@ -48,7 +48,16 @@ docker compose -p pp-firmware -f deploy/compose.yaml up -d
 首次或证书更新后，使用 `curl --cacert ../private/tls/ca.crt https://110.0.0.82:9443/healthz` 核对。
 
 `/pp-sim/` 读取 `../runtime/passportsim/`。首次安装可从已初始化的
-`../upstream/passportsim/` 构建，在其根目录使用固定 Rust 工具链执行
+`../upstream/passportsim/` 构建。该子模块锁定上游提交，先在干净的子模块上应用本站维护的补丁：
+
+```sh
+git -C ../upstream/passportsim am "$PWD/../upstream/patches/passportsim/"*.patch
+```
+
+已经应用的源码可以直接构建。补丁包含 PA-Terminal 所需的虚拟 Wi-Fi、TCP 和按键适配。
+它将模拟器快照格式升为 29。格式 28 的快照仍由旧引擎使用，新引擎需从固件重新开会话。
+
+在子模块根目录使用固定 Rust 工具链执行
 `cargo build --locked -p pemu-wasm --lib --target wasm32-unknown-unknown --profile wasm-release`，
 在 `web/` 中使用 `.bun-version` 指定的 Bun 运行 `bun install --frozen-lockfile` 和 `bun run build`。
 将 `web/dist/`、构建出的 `pemu_wasm.wasm` 及随附许可证安装到该运行目录。
