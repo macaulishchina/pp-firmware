@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PP Lab · 固件验收</title>
+  <link rel="stylesheet" href="/lab.css">
+  <script type="module" src="/lab.js"></script>
+</head>
+<body>
+  <header><strong>PP Lab</strong><span>固件验收</span></header>
+  <main>
+    <section aria-label="运行配置" class="toolbar">
+      <label>固件版本 <select id="image"></select></label>
+      <label>场景 <select id="scenario"></select></label>
+      <button id="boot">启动固件</button>
+      <button id="run" class="primary">运行场景</button>
+      <label class="check"><input type="checkbox" id="fault"> 注入断言失败</label>
+      <output id="status" role="status">读取固件目录…</output>
+    </section>
+    <section class="workbench" aria-label="仿真台">
+      <article class="device">
+        <h2>设备画面</h2>
+        <div class="screen"><img id="screen" alt="PP LCD 截图" hidden></div>
+        <div class="keys">
+          <button data-key="up" disabled>↑ 上</button>
+          <button data-key="ok" disabled>OK</button>
+          <button data-key="down" disabled>↓ 下</button>
+          <button data-key="up" data-ms="850" disabled>长按 ↑</button>
+        </div>
+        <a id="snapshot" download="pp-screen.png" hidden>保存截图</a>
+      </article>
+      <article class="details">
+        <div class="panels">
+          <section><h2>LVGL 界面</h2><pre id="tree">等待启动</pre></section>
+          <section><h2>串口</h2><pre id="serial">等待启动</pre>
+            <form id="serial-form"><label for="command">串口命令</label><input id="command" value="pp.status" maxlength="128"><button id="send" disabled>发送</button></form>
+          </section>
+        </div>
+        <h2>场景步骤</h2>
+        <ol id="steps"></ol>
+      </article>
+    </section>
+    <section class="history" aria-label="运行记录">
+      <h2>运行记录</h2>
+      <div class="records"><ul id="runs"></ul><article id="record" aria-live="polite"></article></div>
+    </section>
+  </main>
+</body>
+</html>

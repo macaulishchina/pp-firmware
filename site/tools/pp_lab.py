@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import tomllib
+import pp_sim
 
 SITE = Path(__file__).resolve().parents[1]
 DEMO = SITE / "public/pp-demo"
@@ -365,12 +366,25 @@ def main():
     triage.add_argument("status", choices=["open", "retest", "resolved"])
     triage.add_argument("--summary", required=True)
     commands.add_parser("status", help="Refresh PP 交互演示 status and stale indicators")
+    pp_sim.configure(commands.add_parser("sim", help="Exercise real PP firmware in PassportSim"))
     args = parser.parse_args()
     os.umask(0o077)
-    if any(args.state_dir.resolve().is_relative_to(SITE / directory) for directory in ("public", "dist")):
+    if any(args.state_dir.resolve().is_relative_to(directory) for directory in (
+        SITE / "public", SITE / "dist", SITE.parent / "runtime", SITE.parent / "releases",
+    )):
         parser.error("Private evidence must stay outside the website directories.")
     args.state_dir.mkdir(parents=True, exist_ok=True)
     (args.state_dir / "runs").mkdir(exist_ok=True)
+    if args.command == "sim":
+        def build_candidate():
+            with (args.state_dir / "lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lab = Lab(args)
+                if lab.run(["candidate"]):
+                    return None
+                return lab.record["stages"]["candidate"]["run"]
+
+        return pp_sim.execute(args, build_candidate)
     with (args.state_dir / "lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -401,6 +415,6 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(error, file=sys.stderr)
         raise SystemExit(2) from None

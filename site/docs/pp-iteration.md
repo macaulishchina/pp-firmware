@@ -31,6 +31,57 @@ python3 tools/pp_lab.py status
 `device` 只读 `pp.status`，它的通过代表串口能通信。页面会单独说明采样时的 PA 连接状态。
 候选构建只产生私有刷写包。刷写和发布使用现有流程，不由测试脚本触发。
 
+## 用 PassportSim 验证真实固件
+
+固件验收台使用部署在 `runtime/passportsim/` 的 PassportSim Worker 和 WASM。浏览器和命令行
+执行同一套场景。每次都从空 NVS 启动，根据虚拟时间发送按键和 USB 串口命令，断言真实固件的
+LVGL 界面及串口回复。构建、测试和证据均在 Dell 上完成。
+
+```sh
+# 从 site/ 启动浏览器验收台。Dell 已运行时直接转发 9451。
+python3 tools/pp_lab.py sim serve
+
+# 选择已发布版本，或以一次候选构建的运行编号选择私有候选。
+python3 tools/pp_lab.py sim run --version 0.2.1-preview.6 --case offline-settings
+python3 tools/pp_lab.py sim run --candidate CANDIDATE_RUN --case offline-settings
+
+# 检查失败步骤、预期与实际、截图文件名，以及串口输出。
+python3 tools/pp_lab.py sim inspect SIM_RUN
+python3 tools/pp_lab.py sim inspect SIM_RUN --serial
+python3 tools/pp_lab.py sim replay SIM_RUN
+```
+
+浏览器打开 `http://127.0.0.1:9451/` 后可以选版本、运行场景，也可以手动启动、按键、发送
+`pp.status` 和保存截图。浏览器远程连接 Dell 时，在 VS Code 将 Dell 的 9451 转发到本机
+9451。验收台和调试文件仅通过这个本地入口访问。9443 的验收进度提供入口链接。
+
+使用 `?image=release:0.2.1-preview.6&case=offline-settings` 预选版本和场景，
+或使用 `?run=SIM_RUN` 打开一条记录。运行摘要包含编号和证据目录。
+详细证据位于 `../private/pp-lab/sim/runs/SIM_RUN/`，包含步骤、固件与模拟器哈希、
+关键截图、控件树和串口。复跑会核对 Flash、应用、ELF、模拟器和场景的指纹。
+`--fault` 或页面中的「注入断言失败」用于验收失败证据，复跑时默认执行原场景。
+旧版固件缺少调试符号时，通过
+`python3 tools/pp_lab.py sim attach-elf --version VERSION /path/to/pa_terminal.elf`
+登记同次构建的 ELF。工具会核对应用描述里的 ELF 哈希。
+
+### 修复后的完整迭代
+
+```sh
+# 在 PersonalAgent 中修复固件后，构建、私有预发布、虚拟安装并执行 16 步场景。
+python3 tools/pp_lab.py sim iterate --case offline-maintenance
+# 同一产物再次验证，直接复跑已有记录。
+python3 tools/pp_lab.py sim replay SIM_RUN
+```
+
+`iterate` 复用 ESP-IDF 的增量构建和现有发布器。每次候选使用自己的私有发布目录，
+模拟器从生成的安装 ZIP 校验各分片并启动固件。场景覆盖网络诊断、离线重载提示、
+维护确认取消、长按回主页和串口状态。用例位于 `tools/sim/scenes.json`，失败时查看实际
+界面与串口再修改固件或断言。候选通过后，通过现有发布工具登记新版本，使用固件站
+的浏览器 USB 安装和真机验收流程完成交付。
+
+仿真覆盖固件界面、按键、模拟存储和可复现的串口行为。实际热点配网、录放音、按键手感
+及休眠功耗仍按真机用例验证。
+
 初次用 `--ssh-host`、`--ssh-port`、`--ssh-key` 和 `--known-hosts` 配置已验证的 Windows 烧录台。
 这四项只保存在本机私有工作目录。之后用 `run device` 复用；反向隧道窗口和 PP USB 需要保持连接。
 USB 未就绪时页面显示唤醒或检查数据线的操作。远程串口只能作为现场验收的一项证据。

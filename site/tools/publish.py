@@ -87,11 +87,14 @@ def atomic_text(path, text):
         Path(name).unlink(missing_ok=True)
 
 
-def update_catalog():
+def update_catalog(root=None, catalog=None):
+    if catalog is None:
+        catalog = (SITE if root is None else root / "site") / "config/pp.toml"
+    root = ROOT if root is None else root
     entries = []
-    for path in sorted((ROOT / "releases").glob("*/*/manifest.json")):
+    for path in sorted((root / "releases").glob("*/*/manifest.json")):
         manifest = json.loads(path.read_text())
-        entries.append((path.parent.relative_to(ROOT / "releases").as_posix(), manifest))
+        entries.append((path.parent.relative_to(root / "releases").as_posix(), manifest))
     # Keep each application's newest release first, so a fix becomes the default
     # without modifying the immutable files of previously published versions.
     def version_order(entry):
@@ -129,10 +132,11 @@ def update_catalog():
         }.items():
             text += f"image.esp32-c3.{key} = {quote(values)}\n"
     tomllib.loads(text)  # Never replace the live catalog with malformed TOML.
-    atomic_text(SITE / "config/pp.toml", text)
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    atomic_text(catalog, text)
 
 
-def publish(candidate, app_id, description, readme, channel=None):
+def publish(candidate, app_id, description, readme, channel=None, *, root=None, catalog=None):
     if not re.fullmatch(r"[a-z][a-z0-9_-]{0,40}", app_id):
         raise ValueError("Invalid application id")
     candidate = Path(candidate)
@@ -142,7 +146,7 @@ def publish(candidate, app_id, description, readme, channel=None):
         if channel not in {"daily", "stable", "preview"}:
             raise ValueError("Unknown release channel")
         manifest["release_channel"] = channel
-    target = ROOT / "releases" / app_id / manifest["version"]
+    target = (ROOT if root is None else root) / "releases" / app_id / manifest["version"]
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         existing = json.loads((target / "manifest.json").read_text())
@@ -176,8 +180,8 @@ def publish(candidate, app_id, description, readme, channel=None):
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
-    update_catalog()
-    print(target)
+    update_catalog(root, catalog)
+    return target
 
 
 if __name__ == "__main__":
@@ -191,4 +195,4 @@ if __name__ == "__main__":
     lock = ROOT / "private/publish.lock"
     with lock.open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        publish(args.candidate, args.id, args.description, args.readme, args.channel)
+        print(publish(args.candidate, args.id, args.description, args.readme, args.channel))
