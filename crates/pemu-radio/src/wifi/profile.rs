@@ -348,7 +348,7 @@ mod tests {
         let p = WifiProfile::load();
         assert_eq!(p.idf, "5.5.3");
         assert_eq!(p.module, "wifi");
-        assert_eq!(p.hooks.len(), 21);
+        assert_eq!(p.hooks.len(), 22);
         assert_eq!(p.hook(0).map(|h| h.name.as_str()), Some("esp_wifi_init"));
         assert_eq!(
             p.hook(13).map(|h| h.name.as_str()),
@@ -462,15 +462,14 @@ mod tests {
 
     #[test]
     fn every_corpus_build_that_links_a_hook_has_a_variant_of_its_own() {
-        // `builds` names exactly the corpus builds that link Wi-Fi; `pk` and `pkgatt` link none.
-        // `probe_wifi_http` is the one device probe measured into the profile.
+        // `builds` names measured images: the Wi-Fi corpus, the HTTP probe, and PA-Terminal.
         let p = WifiProfile::load();
         for hook in &p.hooks {
             for variant in &hook.variants {
                 assert!(
                     variant.builds.split(',').all(|b| matches!(
                         b,
-                        "scan3" | "probe2" | "demo" | "official" | "probe_wifi_http"
+                        "scan3" | "probe2" | "demo" | "official" | "probe_wifi_http" | "pa_terminal"
                     )),
                     "hook `{}` names an unknown build in `{}`",
                     hook.name,
@@ -533,7 +532,7 @@ mod tests {
                 .iter()
                 .filter(|g| g.1 == "wifi_init_completed")
                 .count(),
-            15
+            16
         );
     }
 

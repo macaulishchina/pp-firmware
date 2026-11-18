@@ -22,7 +22,7 @@ pub const MAGIC: [u8; 8] = *b"PEMUSNAP";
 /// Version of the container framing. Also bumped when a machine revision makes the previous
 /// revision's snapshots unrestorable as a whole (`pemu-machine` writes all its sections at one
 /// `SECTION_VERSION`), so the refusal is `UnsupportedFormat`, not a missing or short section.
-pub const FORMAT_VERSION: u16 = 28;
+pub const FORMAT_VERSION: u16 = 29;
 
 /// blake3 of a stored snapshot stream, so a host finds a damaged file before parsing it. Not a
 /// run identity: see [`Snapshot::canonical_hash`].
@@ -1959,11 +1959,11 @@ mod tests {
     /// Each older format changed a section layout without a section version bump, so the whole
     /// container is refused rather than misdecoded.
     #[test]
-    fn a_format_5_through_27_container_is_refused() {
-        assert_eq!(FORMAT_VERSION, 28);
+    fn a_format_5_through_28_container_is_refused() {
+        assert_eq!(FORMAT_VERSION, 29);
         for older in [
             5u16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-            27,
+            27, 28,
         ] {
             let mut bytes = sample_snapshot().to_bytes().expect("writes");
             bytes[MAGIC.len()..MAGIC.len() + 2].copy_from_slice(&older.to_le_bytes());

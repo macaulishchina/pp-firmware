@@ -10,7 +10,7 @@ use pemu_core::reset::{ResetCause, ResetKind};
 use pemu_core::sched::{EventKey, Owner};
 use pemu_core::snap::SnapValue;
 use pemu_soc_c3::periph::i2s0::Dir;
-use pemu_soc_c3::wiring::usj as usj_wiring;
+use pemu_soc_c3::wiring::{gpio as gpio_wiring, usj as usj_wiring};
 
 use super::Machine;
 use crate::hle::{HleHciInput, HleNetInput};
@@ -130,6 +130,9 @@ impl Machine {
             let mut cx = BoardCx::new(entry.at);
             let effect = self.board.apply_input(entry.at, &entry.ev, &mut cx);
             self.drain_board_cx(&mut cx);
+            if matches!(entry.ev, InputEvent::Button { .. }) {
+                self.sample_ladder_gpio();
+            }
             if matches!(
                 entry.ev,
                 InputEvent::UsbCable { .. } | InputEvent::UsbClient { .. }
@@ -138,6 +141,12 @@ impl Machine {
             }
             self.apply_board_effect(effect);
         }
+    }
+
+    pub(crate) fn sample_ladder_gpio(&mut self) {
+        let now = self.now();
+        let pin = self.board.ladder.config().gpio;
+        gpio_wiring::sample_inputs(&mut self.soc.devices.gpio, &self.board, now, 1 << pin);
     }
 
     /// Acts on what a board input or chip event reports: a rail edge to OFF or a brownout powers

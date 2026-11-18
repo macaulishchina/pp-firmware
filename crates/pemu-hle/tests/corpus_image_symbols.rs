@@ -671,7 +671,7 @@ fn profile_guards(file: &str) -> Vec<(String, String)> {
 #[test]
 fn the_first_call_of_every_guarded_hook_reaches_its_guard() {
     let guards = profile_guards("wifi.toml");
-    assert_eq!(guards.len(), 16, "the guarded rows of wifi.toml");
+    assert_eq!(guards.len(), 17, "the guarded rows of wifi.toml");
     let blob = pemu_hle::tripwire::blob_defined_set();
     for (id, flash, elf_bytes) in &builds() {
         let elf = ElfInfo::parse(elf_bytes).expect("the ELF parses");

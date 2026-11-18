@@ -168,6 +168,19 @@ builds = "scan3,probe2,demo,official,probe_wifi_http"
 size = 94
 code_sha256 = "e03e4ee427ad5828d8de9712f74247a6396ec4cd260fc337e8bea4438f80811d"
 
+# PA-Terminal links the station query to verify the SSID after DHCP and to show signal strength.
+# Its result reuses the scan record layout and the virtual LAN's associated peer.
+[[hook]]
+name = "esp_wifi_sta_get_ap_info"
+handler = 21
+section = ".flash.text"
+guard = "wifi_init_completed"
+
+[[variant]]
+builds = "pa_terminal"
+size = 98
+code_sha256 = "988d877d66e13c9d64a5db9a86cceac4f431625b5f59b3063e493ae4a952ce68"
+
 [[hook]]
 name = "esp_wifi_get_mac"
 handler = 7

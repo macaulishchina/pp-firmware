@@ -48,6 +48,7 @@ pub const ESP_ERR_WIFI_IF: u32 = 0x3004;
 pub const ESP_ERR_WIFI_CONN: u32 = 0x3007;
 /// 12309: the `esp_wifi_internal_tx` answer for a started station that is not associated.
 pub const ESP_ERR_WIFI_NOT_ASSOC: u32 = 0x3015;
+const ESP_ERR_WIFI_NOT_CONNECT: u32 = 0x300f;
 /// `WIFI_MODE_STA`.
 pub const MODE_STA: u32 = 1;
 /// `WIFI_MODE_AP`; it and `WIFI_MODE_APSTA` create the SoftAP interface.
@@ -79,6 +80,7 @@ mod timer {
     pub const SCAN: u16 = 1;
     /// The instant an outstanding `esp_wifi_connect` attempt resolves.
     pub const CONNECT: u16 = 2;
+    pub const TCP: u16 = 3;
 }
 
 mod work {
@@ -116,6 +118,7 @@ pub mod handler {
     pub const TX: u16 = 19;
     /// `esp_wifi_internal_set_sta_ip`, which `esp_netif`'s `GOT_IP` handler calls.
     pub const SET_STA_IP: u16 = 20;
+    pub const STA_GET_AP_INFO: u16 = 21;
 }
 
 /// `GOT_IP` is deliberately not a driver state: the address comes from lwIP's DHCP client over
@@ -421,6 +424,7 @@ fn handler_name(kind: HandlerKind) -> Option<&'static str> {
         handler::DISCONNECT => "wifi.disconnect",
         handler::TX => "wifi.tx",
         handler::SET_STA_IP => "wifi.set_sta_ip",
+        handler::STA_GET_AP_INFO => "wifi.sta_get_ap_info",
         _ if kind == worker_handler(MagicKind::WifiWorker) => "wifi.worker",
         _ => return None,
     })
@@ -546,6 +550,12 @@ impl WifiHost {
 
     fn arm(&self, g: &mut dyn GuestView, at: u64, tag: u16) {
         g.schedule(VTime::from_us(at), module_timer(self.module, tag));
+    }
+
+    fn arm_tcp(&self, st: &mut WifiState, g: &mut dyn GuestView) {
+        if let Some(at) = st.lan.arm_tcp_timer() {
+            self.arm(g, at, timer::TCP);
+        }
     }
 
     fn timestamp_call(&self) -> HleAction {
@@ -1167,6 +1177,23 @@ impl WifiHost {
                 match g.write(a1, &st.config_of(a0 as usize)) {
                     Ok(()) => ret(ESP_OK),
                     Err(_) => hle_common::fault("wifi", "wifi_config_t", a1),
+                }
+            }
+            handler::STA_GET_AP_INFO => {
+                if a0 == 0 {
+                    return ret(ESP_ERR_INVALID_ARG);
+                }
+                if st.mode & MODE_STA == 0 {
+                    return ret(ESP_ERR_WIFI_CONN);
+                }
+                let Some(ap) = st.peer.as_ref().filter(|_| st.state == DriverState::Connected) else {
+                    return ret(ESP_ERR_WIFI_NOT_CONNECT);
+                };
+                let mut bytes = vec![0u8; self.profile.driver.ap_record_bytes as usize];
+                super::ap::write_record(ap, &mut bytes);
+                match g.write(a0, &bytes) {
+                    Ok(()) => ret(ESP_OK),
+                    Err(_) => hle_common::fault("wifi", "the station AP record", a0),
                 }
             }
             handler::GET_MAC => {
@@ -1828,6 +1855,7 @@ impl WifiHost {
         for answer in st.lan.input(now, &frame) {
             self.receive_frame(st, g, 0, &answer);
         }
+        self.arm_tcp(st, g);
         ret(ESP_OK)
     }
 
@@ -1877,6 +1905,7 @@ impl WifiHost {
             "wifi.disconnect" => self.disconnect(&mut st, &mut words, g, &resume),
             "wifi.tx" => self.tx(&mut st, g),
             "wifi.set_sta_ip" => self.set_sta_ip(&mut st, g),
+            "wifi.sta_get_ap_info" => self.immediate(handler::STA_GET_AP_INFO, &mut st, g),
             other => HleAction::Fail(HleError::new(
                 HleErrorKind::Handler,
                 format!("the wifi module has no handler `{other}`"),
@@ -2021,6 +2050,12 @@ impl ModuleHost for WifiHost {
         if tag == timer::CONNECT {
             self.finish_connect(&mut st, g, now);
         }
+        if tag == timer::TCP {
+            for frame in st.lan.tcp_timer(now) {
+                self.receive_frame(&mut st, g, 0, &frame);
+            }
+            self.arm_tcp(&mut st, g);
+        }
         let (due, later): (Vec<Outgoing>, Vec<Outgoing>) =
             st.outbox.drain(..).partition(|o| o.due_us <= now);
         st.outbox = later;
@@ -2087,11 +2122,12 @@ impl ModuleHost for WifiHost {
                 Vec::new()
             }
             NetInput::Detach => st.lan.bridge_detach(),
-            NetInput::Packet { seq, data } => st.lan.bridge_packet(seq, data),
+            NetInput::Packet { seq, data } => st.lan.bridge_packet(g.now().as_us(), seq, data),
         };
         for frame in frames {
             self.receive_frame(&mut st, g, 0, &frame);
         }
+        self.arm_tcp(&mut st, g);
         *state = st.encode();
         Ok(Vec::new())
     }
@@ -3549,6 +3585,47 @@ mod tests {
         let events = h.on_timer(st, timer::DISPATCH, g);
         h.deliver(st, MagicKind::WifiWorker, events);
         at
+    }
+
+    #[test]
+    fn station_ap_info_reports_only_the_associated_peer() {
+        let mut h = host();
+        h.workers(WakeMode::U5Polling);
+        let mut g = Guest::default();
+        g.write(EVENT_BASE_AT, &EVENT_BASE.to_le_bytes()).unwrap();
+        let mut st = Vec::new();
+        run_to_associated(&mut h, &mut st, &mut g);
+        assert_eq!(
+            run_immediate(&mut h, &mut st, &mut g, handler::SET_MODE, [MODE_STA, 0]),
+            ESP_OK
+        );
+        set_air(&mut st, vec![ap("New-AP", -20, 6, 0)]);
+
+        let query = handler::STA_GET_AP_INFO;
+        let output = EVENT_BASE_AT + 0x100;
+        assert_eq!(
+            run_immediate(&mut h, &mut st, &mut g, query, [output, 0]),
+            ESP_OK
+        );
+        let mut record = vec![0; WifiProfile::load().driver.ap_record_bytes as usize];
+        g.read(output, &mut record).unwrap();
+        assert_eq!(&record[..6], &wpa2_ap().bssid);
+        assert_eq!(&record[6..15], b"Lab-WPA2\0");
+        assert_eq!(record[39], 1);
+        assert_eq!(record[44] as i8, -37);
+
+        assert_eq!(
+            run_immediate(&mut h, &mut st, &mut g, query, [0, 0]),
+            ESP_ERR_INVALID_ARG
+        );
+        let mut disconnected = WifiState::decode(&st).unwrap();
+        disconnected.state = DriverState::Started;
+        disconnected.peer = None;
+        st = disconnected.encode();
+        assert_eq!(
+            run_immediate(&mut h, &mut st, &mut g, query, [output, 0]),
+            ESP_ERR_WIFI_NOT_CONNECT
+        );
     }
 
     /// Returns 0 at once and associates 212,415 us later with one `STA_CONNECTED` carrying a whole

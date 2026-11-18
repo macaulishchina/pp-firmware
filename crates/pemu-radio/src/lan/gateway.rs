@@ -35,6 +35,8 @@ pub const GATEWAY_MSS: u16 = 1_460;
 /// The gateway consumes every segment at once, so this only bounds how far the guest sends
 /// ahead of an acknowledgement (class C).
 pub const GATEWAY_WINDOW: u16 = 8_192;
+const TCP_RETRY_US: u64 = 1_000_000;
+const TCP_MAX_RETRIES: u8 = 6;
 /// The MSS RFC 9293 section 3.7.1 assumes for a peer that announced none.
 pub const DEFAULT_MSS: u16 = 536;
 /// Deterministic, plus [`ISN_STEP`] per connection, rather than the unpredictable ISN RFC 6528
@@ -79,6 +81,10 @@ pub struct TcpConn {
     pub peer_mss: u16,
     pub request: Vec<u8>,
     pub response: Vec<u8>,
+    /// Sequence number of the first buffered response byte.
+    pub response_seq: u32,
+    pub retry_at_us: u64,
+    pub retries: u8,
     pub answered: bool,
     pub fin_received: bool,
     pub fin_sent: bool,
@@ -103,6 +109,9 @@ snap_struct!(TcpConn {
     peer_mss,
     request,
     response,
+    response_seq,
+    retry_at_us,
+    retries,
     answered,
     fin_received,
     fin_sent,
@@ -161,6 +170,8 @@ pub struct Lan {
     pub first_ack_us: u64,
     pub counters: LanCounters,
     pub bridge: Bridge,
+    /// The already scheduled radio timer, which may fire early after ACK progress.
+    pub tcp_timer_us: u64,
 }
 
 snap_struct!(Lan {
@@ -170,7 +181,8 @@ snap_struct!(Lan {
     ip_id,
     first_ack_us,
     counters,
-    bridge
+    bridge,
+    tcp_timer_us
 });
 
 fn ip(a: [u8; 4]) -> Ipv4Address {
@@ -307,7 +319,7 @@ impl Lan {
                     &bytes,
                 )])
             }
-            IpProtocol::Tcp if to_gateway => self.tcp(src_mac, src, body),
+            IpProtocol::Tcp if to_gateway => self.tcp(now_us, src_mac, src, body),
             _ => None,
         }
     }
@@ -463,10 +475,15 @@ impl Lan {
 
     /// The TCP server half (RFC 9293). A SYN to a service port gets a SYN-ACK; a segment for no
     /// connection gets a RST. The answer goes out within the peer's MSS and window as it
-    /// acknowledges. The server never closes first (HTTP/1.1 keeps the connection). The link is
-    /// lossless, so nothing is retransmitted; a frame the guest's RX capacity drops is recovered by
-    /// the guest's own retransmission.
-    fn tcp(&mut self, src_mac: [u8; 6], src: [u8; 4], body: &[u8]) -> Option<Vec<Vec<u8>>> {
+    /// acknowledges. The guest can drop a received frame, so the oldest unacknowledged bytes
+    /// remain buffered until acknowledged and are retransmitted on a virtual-time deadline.
+    fn tcp(
+        &mut self,
+        now_us: u64,
+        src_mac: [u8; 6],
+        src: [u8; 4],
+        body: &[u8],
+    ) -> Option<Vec<Vec<u8>>> {
         let caps = ChecksumCapabilities::default();
         let packet = TcpPacket::new_checked(body).ok()?;
         let seg = TcpRepr::parse(
@@ -512,15 +529,25 @@ impl Lan {
             let ack = ack.0 as u32;
             let in_flight = conn.snd_nxt.wrapping_sub(conn.snd_una);
             let acked = ack.wrapping_sub(conn.snd_una);
-            if acked <= in_flight {
+            if acked != 0 && acked <= in_flight {
                 conn.snd_una = ack;
+                conn.retries = 0;
+                conn.retry_at_us = 0;
+                if conn.state == tcp_state::SYN_RECEIVED {
+                    conn.state = tcp_state::ESTABLISHED;
+                }
+                let bytes = (ack.wrapping_sub(conn.response_seq) as usize).min(conn.response.len());
+                // Compact in batches for busy streams and release the last acknowledged bytes.
+                if bytes >= usize::from(GATEWAY_WINDOW) || bytes == conn.response.len() {
+                    conn.response.drain(..bytes);
+                    conn.response_seq = conn.response_seq.wrapping_add(bytes as u32);
+                }
             }
-            if conn.state == tcp_state::SYN_RECEIVED && ack == conn.iss.wrapping_add(1) {
-                conn.state = tcp_state::ESTABLISHED;
+            if acked <= in_flight {
+                conn.peer_window = seg.window_len;
             }
         }
-        conn.peer_window = seg.window_len;
-        let mut need_ack = false;
+        let mut need_ack = seg.control == TcpControl::Fin;
         if !seg.payload.is_empty() {
             need_ack = true;
             if seq == conn.rcv_nxt && !conn.fin_received {
@@ -549,7 +576,6 @@ impl Lan {
         {
             conn.fin_received = true;
             conn.rcv_nxt = conn.rcv_nxt.wrapping_add(1);
-            need_ack = true;
             if conn.stream != 0 && !conn.host_closed {
                 // WISP has no half-close: the guest's FIN closes the stream.
                 self.bridge.counters.closed_by_guest += 1;
@@ -567,7 +593,7 @@ impl Lan {
             conn.answered = true;
             self.counters.http_answers += 1;
         }
-        if self.flush(&mut conn, &mut out) {
+        if self.flush(&mut conn, now_us, &mut out) {
             need_ack = false;
         }
         if need_ack {
@@ -583,8 +609,8 @@ impl Lan {
     /// Sends what the peer's window allows of the answer, then the gateway's FIN once the answer is
     /// all out and either side has closed. Returns whether anything was sent (which acknowledges
     /// everything received).
-    fn flush(&mut self, conn: &mut TcpConn, out: &mut Vec<Vec<u8>>) -> bool {
-        let sent_so_far = |c: &TcpConn| c.snd_nxt.wrapping_sub(c.iss.wrapping_add(1)) as usize;
+    fn flush(&mut self, conn: &mut TcpConn, now_us: u64, out: &mut Vec<Vec<u8>>) -> bool {
+        let sent_so_far = |c: &TcpConn| c.snd_nxt.wrapping_sub(c.response_seq) as usize;
         if conn.state == tcp_state::SYN_PENDING || conn.state == tcp_state::SYN_RECEIVED {
             return false;
         }
@@ -608,14 +634,82 @@ impl Lan {
             sent = true;
         }
         let closing = conn.fin_received || (conn.stream != 0 && conn.host_closed);
-        if closing && !conn.fin_sent && sent_so_far(conn) >= conn.response.len() {
+        if closing && !conn.fin_sent && sent_so_far(conn) >= conn.response.len()
+            && conn.snd_nxt.wrapping_sub(conn.snd_una) < u32::from(conn.peer_window)
+        {
             out.push(self.segment(conn, conn.snd_nxt, TcpControl::Fin, &[]));
             conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
             conn.fin_sent = true;
             conn.state = tcp_state::LAST_ACK;
             sent = true;
         }
+        let pending = conn.snd_una != conn.snd_nxt || sent_so_far(conn) < conn.response.len()
+            || (closing && !conn.fin_sent);
+        if pending && conn.retry_at_us == 0 {
+            conn.retry_at_us = now_us.saturating_add(TCP_RETRY_US);
+        }
         sent
+    }
+
+    /// At most one timer is needed. A deadline moved earlier by a new connection may leave
+    /// a later callback in the scheduler. Only the oldest tracked callback does work.
+    pub fn arm_tcp_timer(&mut self) -> Option<u64> {
+        let next = self.tcp.iter().map(|c| c.retry_at_us).filter(|&at| at != 0).min()?;
+        if self.tcp_timer_us != 0 && self.tcp_timer_us <= next {
+            return None;
+        }
+        self.tcp_timer_us = next;
+        Some(next)
+    }
+
+    pub fn tcp_timer(&mut self, now_us: u64) -> Vec<Vec<u8>> {
+        if self.tcp_timer_us == 0 || self.tcp_timer_us > now_us {
+            return Vec::new();
+        }
+        self.tcp_timer_us = 0;
+        let mut out = Vec::new();
+        for mut conn in std::mem::take(&mut self.tcp) {
+            if conn.retry_at_us != 0 && conn.retry_at_us <= now_us {
+                if conn.retries >= TCP_MAX_RETRIES {
+                    if conn.stream != 0 && !conn.host_closed {
+                        self.bridge
+                            .push(bridge::close(conn.stream, bridge::reason::NETWORK));
+                    }
+                    self.counters.tcp_resets += 1;
+                    // The peer expects the first byte it hasn't acknowledged.
+                    out.push(self.segment(&conn, conn.snd_una, TcpControl::Rst, &[]));
+                    continue;
+                }
+                self.retry_segment(&mut conn, &mut out);
+                conn.retries += 1;
+                conn.retry_at_us = now_us.saturating_add(TCP_RETRY_US << conn.retries.min(3));
+            }
+            self.tcp.push(conn);
+        }
+        self.counters.frames_out += out.len() as u64;
+        out
+    }
+
+    fn retry_segment(&mut self, conn: &mut TcpConn, out: &mut Vec<Vec<u8>>) {
+        let seq = conn.snd_una;
+        let offset = seq.wrapping_sub(conn.response_seq) as usize;
+        let in_flight = conn.snd_nxt.wrapping_sub(seq) as usize;
+        if let Some(remaining) = conn.response.get(offset..).filter(|bytes| !bytes.is_empty()) {
+            // Probe a zero window with one byte if there are no outstanding bytes. If the
+            // window update was lost, the peer can accept it. Otherwise it ACKs the same seq.
+            let len = remaining.len().min(in_flight.max(1)).min(usize::from(conn.peer_mss));
+            out.push(self.segment(conn, seq, TcpControl::Psh, &remaining[..len]));
+            if in_flight == 0 {
+                conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
+            }
+        } else {
+            out.push(self.segment(conn, seq, TcpControl::Fin, &[]));
+            if !conn.fin_sent {
+                conn.fin_sent = true;
+                conn.state = tcp_state::LAST_ACK;
+                conn.snd_nxt = conn.snd_nxt.wrapping_add(1);
+            }
+        }
     }
 
     fn reset(&mut self, conn: &TcpConn) -> Vec<u8> {
@@ -646,7 +740,7 @@ impl Lan {
         out
     }
 
-    pub fn bridge_packet(&mut self, seq: u64, packet: &[u8]) -> Vec<Vec<u8>> {
+    pub fn bridge_packet(&mut self, now_us: u64, seq: u64, packet: &[u8]) -> Vec<Vec<u8>> {
         self.bridge.take_seq(seq);
         let Some((kind, stream, payload)) = bridge::decode(packet) else {
             self.bridge.counters.stray += 1;
@@ -700,7 +794,7 @@ impl Lan {
             }
             _ => self.bridge.counters.stray += 1,
         }
-        self.flush(&mut conn, &mut out);
+        self.flush(&mut conn, now_us, &mut out);
         let closed = conn.fin_sent && conn.fin_received && conn.snd_una == conn.snd_nxt;
         if !closed {
             self.tcp.insert(at, conn);
@@ -736,6 +830,7 @@ impl Lan {
                 iss,
                 snd_una: iss,
                 snd_nxt: iss.wrapping_add(1),
+                response_seq: iss.wrapping_add(1),
                 rcv_nxt: (seg.seq_number.0 as u32).wrapping_add(1),
                 peer_window: seg.window_len,
                 peer_mss: seg
@@ -1299,7 +1394,7 @@ mod tests {
             port: 80,
             host_port: 18_080,
         }]);
-        assert!(lan.bridge_packet(0, &bridge::continue_(0, 64)).is_empty());
+        assert!(lan.bridge_packet(0, 0, &bridge::continue_(0, 64)).is_empty());
         assert_eq!(lan.bridge.credit0, 64);
         lan
     }
@@ -1341,7 +1436,7 @@ mod tests {
         assert!(c.send(&mut lan, TcpControl::Syn, &[], 80).is_empty());
         assert!(sent(&lan, &mut cursor).is_empty());
 
-        let synack = lan.bridge_packet(1, &bridge::continue_(stream, 2));
+        let synack = lan.bridge_packet(0, 1, &bridge::continue_(stream, 2));
         assert_eq!(synack.len(), 1);
         assert_eq!(c.take(&synack[0]).0, TcpControl::Syn);
         assert!(c.send(&mut lan, TcpControl::None, &[], 80).is_empty());
@@ -1357,13 +1452,13 @@ mod tests {
         );
 
         let body = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi";
-        let data = lan.bridge_packet(2, &bridge::encode(bridge::kind::DATA, stream, body));
+        let data = lan.bridge_packet(0, 2, &bridge::encode(bridge::kind::DATA, stream, body));
         let mut got = Vec::new();
         for f in &data {
             got.extend(c.take(f).1);
         }
         assert_eq!(got, body);
-        let fin = lan.bridge_packet(3, &bridge::close(stream, bridge::reason::VOLUNTARY));
+        let fin = lan.bridge_packet(0, 3, &bridge::close(stream, bridge::reason::VOLUNTARY));
         assert_eq!(fin.len(), 1);
         assert_eq!(c.take(&fin[0]).0, TcpControl::Fin);
         c.send(&mut lan, TcpControl::None, &[], 80);
@@ -1389,10 +1484,85 @@ mod tests {
         };
         c.send(&mut lan, TcpControl::Syn, &[], 80);
         let stream = lan.tcp[0].stream;
-        let rst = lan.bridge_packet(1, &bridge::close(stream, bridge::reason::REFUSED));
+        let rst = lan.bridge_packet(0, 1, &bridge::close(stream, bridge::reason::REFUSED));
         assert_eq!(c.take(&rst[0]).0, TcpControl::Rst);
         assert!(lan.tcp.is_empty());
         assert_eq!(lan.bridge.counters.refused, 1);
+    }
+
+    #[test]
+    fn the_gateway_recovers_a_lost_response_and_fin_without_replaying_the_request() {
+        let mut lan = bridged_lan();
+        let mut cursor = 0;
+        let mut client = Client {
+            seq: 100,
+            ack: 0,
+            port: 49_204,
+        };
+        client.send(&mut lan, TcpControl::Syn, &[], 80);
+        let stream = lan.tcp[0].stream;
+        let synack = lan.bridge_packet(0, 1, &bridge::continue_(stream, 8));
+        client.take(&synack[0]);
+        client.send(&mut lan, TcpControl::Psh, GET, 80);
+        assert_eq!(sent(&lan, &mut cursor).len(), 2);
+
+        let body = vec![b'x'; 2_000];
+        let response = lan.bridge_packet(0, 2, &bridge::encode(bridge::kind::DATA, stream, &body));
+        assert_eq!(response.len(), 2);
+        let first = client.ack;
+        client.take(&response[1]); // The client refuses the second segment across the gap.
+        assert_eq!(client.ack, first);
+        assert_eq!(lan.arm_tcp_timer(), Some(TCP_RETRY_US));
+        assert!(lan.tcp_timer(TCP_RETRY_US - 1).is_empty());
+        let retry = lan.tcp_timer(TCP_RETRY_US);
+        let mut received = client.take(&retry[0]).1;
+        assert_eq!(client.ack, first.wrapping_add(1_440));
+        received.extend(client.take(&response[1]).1);
+        assert_eq!(received, body);
+        client.send(&mut lan, TcpControl::None, &[], 80);
+        assert!(lan.tcp[0].response.is_empty());
+        assert_eq!(lan.arm_tcp_timer(), None);
+
+        let now = 2 * TCP_RETRY_US;
+        let fin = lan.bridge_packet(now, 3, &bridge::close(stream, bridge::reason::VOLUNTARY));
+        assert_eq!(fin.len(), 1);
+        assert_eq!(lan.arm_tcp_timer(), Some(now + TCP_RETRY_US));
+        let retry = lan.tcp_timer(now + TCP_RETRY_US);
+        assert_eq!(client.take(&retry[0]).0, TcpControl::Fin);
+        assert_eq!(client.ack, first.wrapping_add(body.len() as u32 + 1));
+        client.send(&mut lan, TcpControl::Fin, &[], 80);
+        assert!(lan.tcp.is_empty());
+        assert!(sent(&lan, &mut cursor).is_empty());
+    }
+
+    #[test]
+    fn stalled_downstream_closes_the_stream_after_bounded_retries() {
+        let mut lan = bridged_lan();
+        let mut cursor = 0;
+        let mut client = Client {
+            seq: 200,
+            ack: 0,
+            port: 49_205,
+        };
+        client.send(&mut lan, TcpControl::Syn, &[], 80);
+        let stream = lan.tcp[0].stream;
+        client.take(&lan.bridge_packet(0, 1, &bridge::continue_(stream, 2))[0]);
+        client.send(&mut lan, TcpControl::None, &[], 80);
+        sent(&lan, &mut cursor);
+        lan.bridge_packet(0, 2, &bridge::encode(bridge::kind::DATA, stream, b"pending"));
+        for _ in 0..TCP_MAX_RETRIES {
+            let due = lan.arm_tcp_timer().unwrap();
+            assert_eq!(lan.tcp_timer(due).len(), 1);
+        }
+        let due = lan.arm_tcp_timer().unwrap();
+        let out = lan.tcp_timer(due);
+        assert_eq!(client.take(&out[0]).0, TcpControl::Rst);
+        assert_eq!(lan.arm_tcp_timer(), None);
+        assert!(lan.tcp.is_empty());
+        assert_eq!(
+            sent(&lan, &mut cursor),
+            vec![(bridge::kind::CLOSE, stream, vec![bridge::reason::NETWORK])]
+        );
     }
 
     /// WISP v1 credit is counted in packets; the guest's retransmission goes out once a `CONTINUE`
@@ -1408,7 +1578,7 @@ mod tests {
         };
         c.send(&mut lan, TcpControl::Syn, &[], 80);
         let stream = lan.tcp[0].stream;
-        let s = lan.bridge_packet(1, &bridge::continue_(stream, 0));
+        let s = lan.bridge_packet(0, 1, &bridge::continue_(stream, 0));
         c.take(&s[0]);
         c.send(&mut lan, TcpControl::None, &[], 80);
         sent(&lan, &mut cursor);
@@ -1416,7 +1586,7 @@ mod tests {
         c.send(&mut lan, TcpControl::Psh, b"x", 80);
         assert!(sent(&lan, &mut cursor).is_empty(), "held");
         assert_eq!(lan.bridge.counters.held, 1);
-        lan.bridge_packet(2, &bridge::continue_(stream, 1));
+        lan.bridge_packet(0, 2, &bridge::continue_(stream, 1));
         c.seq = before;
         c.send(&mut lan, TcpControl::Psh, b"x", 80);
         assert_eq!(
@@ -1437,7 +1607,7 @@ mod tests {
         };
         c.send(&mut lan, TcpControl::Syn, &[], 80);
         let stream = lan.tcp[0].stream;
-        let s = lan.bridge_packet(1, &bridge::continue_(stream, 8));
+        let s = lan.bridge_packet(0, 1, &bridge::continue_(stream, 8));
         c.take(&s[0]);
         sent(&lan, &mut cursor);
         let rsts = lan.bridge_detach();

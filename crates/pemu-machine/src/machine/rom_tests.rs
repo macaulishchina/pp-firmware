@@ -1532,6 +1532,27 @@ fn power_on_reaches_every_block_and_republishes_the_pins_it_dropped() {
 }
 
 #[test]
+fn the_ladder_drives_digital_gpio_during_input_and_reset() {
+    use pemu_core::input::ButtonId;
+
+    let mut m = machine();
+    let mask = 1 << m.board.ladder.config().gpio;
+    assert_ne!(m.soc.devices.gpio.in_levels() & mask, 0, "released after power-on");
+
+    m.input(At::Now, InputEvent::Button { id: ButtonId::Ok, down: true })
+        .expect("journaled press");
+    m.apply_due_journal();
+    assert_eq!(m.soc.devices.gpio.in_levels() & mask, 0, "held");
+    m.power_on();
+    assert_eq!(m.soc.devices.gpio.in_levels() & mask, 0, "held across reset");
+
+    m.input(At::Now, InputEvent::Button { id: ButtonId::Ok, down: false })
+        .expect("journaled release");
+    m.apply_due_journal();
+    assert_ne!(m.soc.devices.gpio.in_levels() & mask, 0, "released");
+}
+
+#[test]
 fn an_origin_carrying_input_raises_the_receipt_class() {
     use pemu_core::journal::Determinism;
     let mut m = machine();

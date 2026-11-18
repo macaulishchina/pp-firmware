@@ -285,6 +285,7 @@ impl Machine {
         } else {
             0
         };
+        self.sample_ladder_gpio();
 
         // 5. State outside the models: MMU windows, PMP permissions, the stack monitor the reset
         // guard now holds, and the USJ link a block reset dropped.
