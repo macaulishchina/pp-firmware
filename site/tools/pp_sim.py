@@ -1,23 +1,17 @@
-"""Private, loopback-only PP Lab workbench and shared browser automation."""
+"""Firmware and evidence storage for PP Lab simulation commands."""
 import argparse
 import base64
 from collections.abc import Callable
-from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import mimetypes
 from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
-from threading import Thread
-from urllib.parse import unquote, urlsplit
-from zipfile import BadZipFile, ZipFile
+import tomllib
+from zipfile import ZipFile
 
 import publish
 
@@ -28,12 +22,10 @@ ENGINE = ROOT / "runtime/passportsim"
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?")
 RUN = re.compile(r"\d{8}T\d{6}-[a-z0-9_]{8}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
-ARTIFACT = re.compile(r"(?:serial\.txt|step-[0-9]{2}\.(?:png|txt))")
-ENGINE_ASSET = re.compile(r"/engine/([a-f0-9]{64})-([a-f0-9]{64})/(worker\.js|pemu_wasm\.wasm)")
 RELEASE_PARTS = {"bootloader.bin", "partition-table.bin", "pa_terminal.bin"}
 FLASH_BYTES = 8 * 1024 * 1024
 MAX_ELF = 32 * 1024 * 1024
-MAX_EVIDENCE = 2 * 1024 * 1024
+DEFAULT_SESSION_IDLE_HOURS = 24
 PNG = b"\x89PNG\r\n\x1a\n"
 
 
@@ -171,7 +163,7 @@ class SimLab:
             temp.unlink(missing_ok=True)
         return target
 
-    def catalog(self):
+    def published(self):
         images = []
         for folder in sorted(self.releases.glob("*"), reverse=True):
             if not VERSION.fullmatch(folder.name) or not (folder / "firmware.zip").is_file():
@@ -182,6 +174,10 @@ class SimLab:
             images.append({"id": f"release:{folder.name}", "version": folder.name,
                            "title": f"{folder.name} · 已发布" + ("" if has_elf else " · 缺调试符号"),
                            "ready": bool(has_elf)})
+        return images
+
+    def catalog(self):
+        images = self.published()
         for folder in sorted((self.state / "runs").glob("*"), reverse=True):
             try:
                 _, version = self.candidate(folder.name)
@@ -214,14 +210,6 @@ class SimLab:
         if not RUN.fullmatch(ident):
             raise ValueError("Invalid simulation run ID")
         return json.loads((self.evidence / ident / "run.json").read_text())
-
-    def records(self):
-        return [
-            {"id": folder.name, **{key: rec[key] for key in ("version", "scenario", "at", "status")}}
-            for folder in sorted(self.evidence.iterdir(), reverse=True)
-            if RUN.fullmatch(folder.name) and (folder / "run.json").is_file()
-            for rec in [self.record(folder.name)]
-        ][:30]
 
     def save(self, result):
         scenarios = self.scenarios
@@ -272,137 +260,74 @@ class SimLab:
         return result
 
 
-class Handler(BaseHTTPRequestHandler):
-    server_version = "PP-Lab"
-
-    def log_message(self, *args):
-        pass
-
-    def reply(self, data, kind, status=200, **headers):
-        chunks = (data,) if isinstance(data, bytes) else data
-        self.send_response(status)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(sum(map(len, chunks))))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
-        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'wasm-unsafe-eval'")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        for name, value in headers.items():
-            self.send_header(name, value)
-        self.end_headers()
-        for chunk in chunks:
-            self.wfile.write(chunk)
-
-    def json(self, item, status=200):
-        self.reply(json.dumps(item, ensure_ascii=False).encode(), "application/json; charset=utf-8", status)
-
-    def allowed_host(self):
-        return re.fullmatch(r"(?:127\.0\.0\.1|localhost)(?::[0-9]{1,5})?", self.headers.get("Host", ""))
-
-    def read_file(self, path, expected=None):
-        kind = mimetypes.guess_type(path)[0] or "application/octet-stream"
-        if path.suffix == ".wasm":
-            kind = "application/wasm"
-        data = path.read_bytes()
-        if expected is not None and sha(data) != expected:
-            raise ValueError("PassportSim was updated during boot. Start the run again.")
-        self.reply(data, kind)
-
-    def handle_route(self):
-        lab = self.server.lab
-        path = urlsplit(self.path).path
-        if path in {"/", "/lab.js", "/engine.js", "/lab.css"}:
-            return self.read_file(WEB / (path[1:] or "index.html"))
-        if asset := ENGINE_ASSET.fullmatch(path):
-            worker, wasm, name = asset.groups()
-            return self.read_file(ENGINE / name, worker if name == "worker.js" else wasm)
-        if path == "/catalog":
-            return self.json(lab.catalog())
-        if path == "/runs":
-            return self.json(lab.records())
-        if path.startswith("/images/") and path.count("/") == 2:
-            meta, flash, elf = lab.image(unquote(path.split("/", 2)[2]))
-            return self.reply((flash, elf), "application/octet-stream", **{"X-PP-Image": json.dumps(meta)})
-        if path.startswith("/runs/"):
-            parts = path[6:].split("/")
-            record = lab.record(parts[0])
-            if len(parts) == 1:
-                return self.json(record)
-            if len(parts) == 2 and ARTIFACT.fullmatch(parts[1]):
-                return self.read_file(lab.evidence / parts[0] / parts[1])
-        self.json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
-
-    def do_GET(self):
-        if not self.allowed_host():
-            return self.json({"error": "Use the local PP Lab URL"}, HTTPStatus.FORBIDDEN)
-        try:
-            self.handle_route()
-        except FileNotFoundError:
-            self.json({"error": "Firmware, simulator or run artifact is missing"}, HTTPStatus.NOT_FOUND)
-        except (BadZipFile, KeyError, TypeError, ValueError) as error:
-            self.json({"error": str(error)}, HTTPStatus.UNPROCESSABLE_ENTITY)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-    def do_POST(self):
-        host = self.headers.get("Host", "")
-        if (
-            not self.allowed_host() or self.headers.get("Origin") != f"http://{host}"
-            or self.path != "/runs" or self.headers.get_content_type() != "application/json"
-        ):
-            return self.json({"error": "Only the local workbench can save runs"}, HTTPStatus.FORBIDDEN)
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= MAX_EVIDENCE:
-                raise ValueError("Run record exceeds its size limit")
-            self.connection.settimeout(10)
-            self.json(self.server.lab.save(json.loads(self.rfile.read(size))), HTTPStatus.CREATED)
-        except (KeyError, ValueError, TypeError, AttributeError, TimeoutError) as error:
-            self.json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+def service_config(path):
+    with path.open("rb") as handle:
+        config = tomllib.load(handle)
+    limit = config.get("max_sessions", 5)
+    if type(limit) is not int or limit < 0:
+        raise ValueError("max_sessions must be an integer greater than or equal to 0")
+    idle_hours = config.get("session_idle_timeout_hours", DEFAULT_SESSION_IDLE_HOURS)
+    if type(idle_hours) is not int or idle_hours <= 0:
+        raise ValueError("session_idle_timeout_hours must be a positive integer")
+    base = config.get("public_base", "https://47.109.34.254:9443/pp-sim/")
+    if not isinstance(base, str) or not re.fullmatch(r"https://[A-Za-z0-9.:-]+/pp-sim/", base):
+        raise ValueError("public_base must be an HTTPS URL ending in /pp-sim/")
+    return {"max_sessions": limit, "idle_timeout": idle_hours * 3600, "public_base": base}
 
 
-def server_for(lab, port):
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    server.lab = lab
-    return server
-
-
-@contextmanager
-def temporary_server(lab):
-    with server_for(lab, 0) as server:
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            yield f"http://127.0.0.1:{server.server_port}"
-        finally:
-            server.shutdown()
-            thread.join()
-
-
-def browser_run(lab, image, scenario, fault=False, old=None):
+def worker(lab, action, config, timeout=None):
     python = lab.pa / ".venv/bin/python"
-    script = WEB / "headless.py"
-    # Reuse the very same browser actions and evidence as the workbench.
-    with temporary_server(lab) as address:
-        config = {"image": image, "scenario": scenario, "fault": fault, "expected": old}
-        command = [python, script, address, json.dumps(config, ensure_ascii=False), lab.evidence]
-        result = subprocess.run(command, timeout=180, check=False)
-    return result.returncode
+    script = Path(__file__).with_name("pp_sim_cli.py")
+    command = [python, script, action, str(lab.state), str(lab.pa), json.dumps(config)]
+    return subprocess.run(command, timeout=timeout, check=False).returncode
+
+
+def browser_run(lab, image, scenario, args, config, expected=None):
+    options = {
+        **config, "image": image, "scenario": scenario, "fault": args.fault, "expected": expected,
+        "share": args.share or args.wait_for_join or args.wait_for_slot or args.replace_oldest,
+        "wait": args.wait_for_join, "wait_for_slot": args.wait_for_slot,
+        "replace_oldest": args.replace_oldest,
+    }
+    timeout = None if args.wait_for_slot else 180 + (35 if args.wait_for_join else 0)
+    return worker(lab, "run", options, timeout=timeout)
+
+
+def capacity_options(command):
+    choices = command.add_mutually_exclusive_group()
+    choices.add_argument("--wait-for-slot", action="store_true", help="Wait in the shared-session queue")
+    choices.add_argument("--replace-oldest", action="store_true",
+                         help="Replace the least recently active instance if all slots are busy")
 
 
 def configure(parser):
     commands = parser.add_subparsers(dest="sim_command", required=True)
-    serve = commands.add_parser("serve", help="Open the private browser workbench")
-    serve.add_argument("--port", type=int, default=9451)
+    parser.add_argument("--config", type=Path, default=SITE / "config/passportsim.toml")
+    serve = commands.add_parser("serve", help="Run shared instances for PassportSim")
+    serve.add_argument("--socket", type=Path, default=ROOT / "runtime/passportsim-service/public.sock")
+    serve.add_argument("--group", type=int, help="Group that can connect to the public Unix socket")
+    session = commands.add_parser("session", help="Control a shared instance locally")
+    operations = session.add_subparsers(dest="operation", required=True)
+    new = operations.add_parser("new", help="Start a persistent shared instance")
+    source = new.add_mutually_exclusive_group(required=True)
+    source.add_argument("--version")
+    source.add_argument("--candidate")
+    capacity_options(new)
+    for name in ("status", "serial", "screen", "end", "press", "send"):
+        operation = operations.add_parser(name)
+        operation.add_argument("session_id")
+        if name == "screen":
+            operation.add_argument("output", type=Path)
+        elif name == "press":
+            operation.add_argument("key", choices=("up", "ok", "down", "power"))
+            operation.add_argument("--ms", type=int, default=210)
+        elif name == "send":
+            operation.add_argument("line")
     commands.add_parser("catalog", help="List firmware and scenario IDs")
     attach = commands.add_parser("attach-elf", help="Register matching symbols for a published version")
     attach.add_argument("--version", required=True)
     attach.add_argument("elf", type=Path)
-    run = commands.add_parser("run", help="Run the browser workbench in headless Chromium")
+    run = commands.add_parser("run", help="Run a deterministic PassportSim scenario")
     source = run.add_mutually_exclusive_group(required=True)
     source.add_argument("--version", help="Use an immutable published PA-Terminal version")
     source.add_argument("--candidate", help="Use a PP Lab candidate run ID")
@@ -420,19 +345,27 @@ def configure(parser):
     iterate = commands.add_parser("iterate", help="Build, publish privately, install in the emulator and test")
     iterate.add_argument("--case", default="offline-maintenance")
     iterate.add_argument("--fault", action="store_true")
+    for action in (run, replay, iterate):
+        capacity_options(action)
+        action.add_argument("--share", action="store_true", help="Print a PassportSim session link")
+        action.add_argument("--wait-for-join", action="store_true",
+                            help="Share and wait up to 30 seconds for a browser to join")
 
 
 def execute(args, build: Callable[[], str | None]):
     lab = SimLab(args.state_dir.resolve(), args.pa_root.resolve())
     command = args.sim_command
+    config = service_config(args.config)
     if command == "serve":
-        with server_for(lab, args.port) as server:
-            print(f"PP Lab · http://127.0.0.1:{server.server_port}/", flush=True)
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                pass
-        return 0
+        return worker(lab, "serve", {**config, "socket": str(args.socket.resolve()), "group": args.group})
+    if command == "session":
+        options = vars(args)
+        keys = ("operation", "version", "candidate", "session_id", "output", "key", "ms", "line")
+        wait_for_slot = options.get("wait_for_slot", False)
+        return worker(lab, "session", {
+            **config, **{key: str(options[key]) for key in keys if options.get(key) is not None},
+            "wait_for_slot": wait_for_slot, "replace_oldest": options.get("replace_oldest", False),
+        }, timeout=None if wait_for_slot else 60)
     if command == "catalog":
         print(json.dumps(lab.catalog(), ensure_ascii=False, indent=2))
         return 0
@@ -452,7 +385,7 @@ def execute(args, build: Callable[[], str | None]):
             raise ValueError("This run never verified a bootable image")
         keys = ("sha256", "flashSha256", "elfSha256", "scenarioSha256", "simulator", "worker")
         required = {key: record[key] for key in keys if record.get(key)}
-        return browser_run(lab, record["image"], record["scenario"], args.fault, required)
+        return browser_run(lab, record["image"], record["scenario"], args, config, expected=required)
     if command == "stage":
         print(lab.stage(args.run))
         return 0
@@ -471,4 +404,4 @@ def execute(args, build: Callable[[], str | None]):
     else:
         image = f"candidate:{args.candidate}"
     lab.locate(image)
-    return browser_run(lab, image, args.case, args.fault)
+    return browser_run(lab, image, args.case, args, config)

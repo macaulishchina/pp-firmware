@@ -33,36 +33,57 @@ python3 tools/pp_lab.py status
 
 ## 用 PassportSim 验证真实固件
 
-固件验收台使用部署在 `runtime/passportsim/` 的 PassportSim Worker 和 WASM。浏览器和命令行
-执行同一套场景。每次都从空 NVS 启动，根据虚拟时间发送按键和 USB 串口命令，断言真实固件的
-LVGL 界面及串口回复。构建、测试和证据均在 Dell 上完成。
+`/pp-sim/` 是唯一的固件模拟网页。裸地址照常在浏览器里运行 PassportSim。通过「新建会话」
+选择已发布且有匹配调试符号的固件，或输入现有会话编号。打开 `/pp-sim/?session=编号`
+即可让几个浏览器与 AI 操作同一实例。每个人都能按键、查看屏幕和串口，也能结束会话。
+链接就是访问凭据，转发给参与这次调试的人。刷新或关闭一个浏览器后，实例仍由 Dell 保存。
+
+服务读取 `site/config/passportsim.toml`。默认 `max_sessions = 5`。达到上限时销毁最久未使用
+的空闲实例，有浏览器连接、断开后短暂重连期内或正在运行场景的实例不参与容量回收。
+`max_sessions = 0` 关闭数量限制与 LRU 回收。
+
+当共享名额全忙时，网页可选择等待空位，或确认顶掉最久未活动的实例。等待按加入顺序，
+页面断开即退出队列，分到名额后自动打开新会话。顶掉按最后一次加入或操作的时间选择；
+所有网页访客和本机 CLI 都可明确选择，原成员会收到结束提示，进行中的场景会中断。
+本机命令可加 `--wait-for-slot` 或 `--replace-oldest`，场景命令使用这些选项时自动进入共享模式。
+
+`session_idle_timeout_hours = 24` 控制自动销毁的空闲时限，即使名额充足也生效。重新加入、
+按键、串口写入等有效操作及本机查询会重新计时。网页挂着时的心跳和自动刷新不会续期，
+正在执行的命令或验收场景会先完成。销毁后会话链接失效，已保存的验收记录仍可通过 CLI 查看。
+配置重启服务后生效，重启会结束共享实例。浏览器本地模拟与独立命令行验收不计入共享名额。
+
+### 命令行开发流程
+
+PassportSim Worker 与 WASM 从 `runtime/passportsim/` 读取。每次验收从空 NVS 启动，
+以虚拟时间执行按键和 USB 串口命令。构建、虚拟安装、测试和证据都由 PP Lab 命令行处理。
 
 ```sh
-# 从 site/ 启动浏览器验收台。Dell 已运行时直接转发 9451。
-python3 tools/pp_lab.py sim serve
-
-# 选择已发布版本，或以一次候选构建的运行编号选择私有候选。
 python3 tools/pp_lab.py sim run --version 0.2.1-preview.6 --case offline-settings
 python3 tools/pp_lab.py sim run --candidate CANDIDATE_RUN --case offline-settings
-
-# 检查失败步骤、预期与实际、截图文件名，以及串口输出。
 python3 tools/pp_lab.py sim inspect SIM_RUN
 python3 tools/pp_lab.py sim inspect SIM_RUN --serial
 python3 tools/pp_lab.py sim replay SIM_RUN
 ```
 
-浏览器打开 `http://127.0.0.1:9451/` 后可以选版本、运行场景，也可以手动启动、按键、发送
-`pp.status` 和保存截图。浏览器远程连接 Dell 时，在 VS Code 将 Dell 的 9451 转发到本机
-9451。验收台和调试文件仅通过这个本地入口访问。9443 的验收进度提供入口链接。
+给 `sim run`、`sim replay` 或 `sim iterate` 加 `--share` 会在标准错误输出共享会话链接。
+短场景可以加 `--wait-for-join`，等待浏览器接入，最多 30 秒。执行场景期间会话显示进度，
+手动写入暂缓。完成后同一会话可继续操作。也可启动一个手动调试会话后按需发送指令。
 
-使用 `?image=release:0.2.1-preview.6&case=offline-settings` 预选版本和场景，
-或使用 `?run=SIM_RUN` 打开一条记录。运行摘要包含编号和证据目录。
-详细证据位于 `../private/pp-lab/sim/runs/SIM_RUN/`，包含步骤、固件与模拟器哈希、
-关键截图、控件树和串口。复跑会核对 Flash、应用、ELF、模拟器和场景的指纹。
-`--fault` 或页面中的「注入断言失败」用于验收失败证据，复跑时默认执行原场景。
-旧版固件缺少调试符号时，通过
+```sh
+python3 tools/pp_lab.py sim session new --candidate CANDIDATE_RUN
+python3 tools/pp_lab.py sim session status SESSION_ID
+python3 tools/pp_lab.py sim session press SESSION_ID ok
+python3 tools/pp_lab.py sim session send SESSION_ID pp.status
+python3 tools/pp_lab.py sim session serial SESSION_ID
+python3 tools/pp_lab.py sim session screen SESSION_ID screen.png
+python3 tools/pp_lab.py sim session end SESSION_ID
+```
+
+详细证据位于 `../private/pp-lab/sim/runs/SIM_RUN/`，包括步骤、镜像与模拟器哈希、
+关键截图、控件树和串口。复跑会核对 Flash、应用、ELF、模拟器和场景指纹。
+`--fault` 注入失败断言，用于验收失败证据。复跑默认执行原场景。
 `python3 tools/pp_lab.py sim attach-elf --version VERSION /path/to/pa_terminal.elf`
-登记同次构建的 ELF。工具会核对应用描述里的 ELF 哈希。
+登记同次构建的调试符号，工具会核对应用描述里的 ELF 哈希。
 
 ### 修复后的完整迭代
 

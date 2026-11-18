@@ -1,0 +1,5 @@
+{
+  "extends": "../../../../upstream/passportsim/web/tsconfig.json",
+  "compilerOptions": { "typeRoots": ["../../../../upstream/passportsim/web/node_modules"], "types": ["bun-types"] },
+  "include": ["*.ts"]
+}

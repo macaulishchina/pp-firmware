@@ -34,7 +34,7 @@
 npm ci
 npm run build
 bash tools/create_tls.sh
-mkdir -p ../runtime/passportsim
+mkdir -p ../runtime/passportsim ../runtime/passportsim-service
 docker compose -p pp-firmware -f deploy/compose.yaml run --rm --no-deps website -t
 docker compose -p pp-firmware -f deploy/compose.yaml up -d
 ```
@@ -53,6 +53,17 @@ docker compose -p pp-firmware -f deploy/compose.yaml up -d
 在 `web/` 中使用 `.bun-version` 指定的 Bun 运行 `bun install --frozen-lockfile` 和 `bun run build`。
 将 `web/dist/`、构建出的 `pemu_wasm.wasm` 及随附许可证安装到该运行目录。
 内置 FoloToy 演示使用 PassportSim 发布包里的 `official.pebundle` 和配套许可。
+
+安装依赖后，在 `site/` 执行 `python3 tools/pp_sim_web.py --bun /path/to/bun`，将会话入口叠加到
+上游构建。源码在本站仓库内；浏览器本地模式由原版网页直接运行。共享运行时复用 PersonalAgent
+的 Playwright 与 aiohttp 环境，只需安装 Chromium 和运行时依赖，无需模型授权。
+
+在默认 Dell 项目路径下，将 `deploy/pp-sim-sessions.service` 安装到 `~/.config/systemd/user/`，
+执行 `systemctl --user daemon-reload` 与 `systemctl --user enable --now pp-sim-sessions.service`。
+Nginx 通过用户服务创建的 Unix socket 代理 API。公网与局域网仍走站点原有 HTTPS 端口，
+本机 CLI 使用独立私有 socket。容器使用的 GID 101 需要能连接公开 socket。
+实例配额与链接域名在 `config/passportsim.toml` 中配置。详情见 [开发与验收闭环](docs/pp-iteration.md)。
+
 
 固件目录按“选择固件 → USB 安装 → 配网与配对”组织。连接／断开集中在安装区；
 配网说明是独立静态页，不读写串口，安装中也可查看。

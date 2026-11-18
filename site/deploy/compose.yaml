@@ -16,6 +16,7 @@ services:
       - ../dist:/usr/share/nginx/html:ro
       - ../public/pp-demo:/srv/pp-demo:ro
       - ../../runtime/passportsim:/srv/pp-sim:ro
+      - ../../runtime/passportsim-service:/run/pp-sim:ro
       - ../config:/srv/catalog:ro
       - ../../releases:/srv/releases:ro
       - ../../private/tls/server.crt:/etc/nginx/tls/server.crt:ro

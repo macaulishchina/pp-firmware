@@ -1,0 +1,5 @@
+# Maximum server-owned simulators. 0 disables capacity checks and LRU eviction.
+max_sessions = 5
+# Destroy a shared session after this many hours without access.
+session_idle_timeout_hours = 24
+public_base = "https://47.109.34.254:9443/pp-sim/"

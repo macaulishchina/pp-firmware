@@ -1,5 +1,6 @@
-"""Browser acceptance for selecting firmware, retaining failures and replaying."""
+"""Browser acceptance for the deployed PassportSim session UI."""
 import argparse
+import sys
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
@@ -8,56 +9,70 @@ from playwright.sync_api import expect, sync_playwright
 def check(url, version):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        page = browser.new_page(base_url=url, viewport={"width": 1440, "height": 1100})
-        page.set_default_timeout(15000)
-        expect.set_options(timeout=15000)
+        pages = [
+            browser.new_page(locale="zh-CN", ignore_https_errors=True, viewport={"width": 1440, "height": 1050})
+            for _ in range(3)
+        ]
+        first, second, local = pages
         issues = []
-        page.on("pageerror", lambda error: issues.append(str(error)))
-        page.goto(url)
-        image = page.get_by_label("固件版本")
-        image.select_option(f"release:{version}")
-        page.get_by_label("场景").select_option("offline-settings")
-        page.get_by_role("button", name="启动固件", exact=True).click()
-        expect(page.locator("#tree")).to_contain_text("设备连接")
-        page.get_by_role("button", name="OK", exact=True).click()
-        expect(page.locator("#tree")).to_contain_text('label "设置"')
-        expect(page.locator("#tree")).to_contain_text("设备维护")
-        page.get_by_role("button", name="发送", exact=True).click()
-        expect(page.locator("#serial")).to_contain_text('"app":"PA-Terminal"')
-        expect(page.get_by_role("link", name="保存截图")).to_be_visible()
+        for page in pages:
+            page.on("pageerror", lambda error: (issues.append(str(error)), print(error.stack or error, file=sys.stderr, flush=True)))
+            page.set_default_timeout(35000)
 
-        page.get_by_label("注入断言失败").check()
-        page.get_by_role("button", name="运行场景").click()
-        record = page.locator("#record")
-        expect(record.get_by_role("heading")).to_contain_text("失败")
-        expect(record).to_contain_text("PP Lab 注入的失败断言")
-        fail = parse_qs(urlsplit(page.url).query)["run"][0]
-        screenshot = record.get_by_role("link", name="打开截图").last
-        png = page.request.get(screenshot.get_attribute("href"))
-        assert png.ok and png.body().startswith(b"\x89PNG\r\n\x1a\n")
-        serial = page.request.get(record.get_by_role("link", name="查看串口").get_attribute("href"))
-        assert serial.ok and "app_main()" in serial.text()
-        info = page.request.get(record.get_by_role("link", name="运行 JSON").get_attribute("href")).json()
-        assert info["steps"][-1]["status"] == "fail"
-        assert "设置" in info["steps"][-1]["actual"]
+        local.goto(url)
+        local.wait_for_function("Boolean(window.passportEmu)", timeout=12000)
+        expect(local.get_by_role("button", name="新建会话")).to_be_enabled(timeout=12000)
+        assert local.evaluate("!document.documentElement.classList.contains('pp-remote')")
 
-        page.reload()
-        expect(record.get_by_role("heading")).to_contain_text("失败")
-        record.get_by_role("button", name="按原版本复跑场景").click()
-        expect(record.get_by_role("heading")).to_contain_text("通过")
-        passed = parse_qs(urlsplit(page.url).query)["run"][0]
-        assert passed != fail
-        new = page.request.get(record.get_by_role("link", name="运行 JSON").get_attribute("href")).json()
-        for key in ("sha256", "elfSha256", "flashSha256", "simulator", "worker", "scenarioSha256", "initial"):
-            assert new[key] == info[key]
+        first.goto(url)
+        first.get_by_label("固件版本").select_option(f"release:{version}")
+        first.get_by_role("button", name="新建会话").click()
+        first.wait_for_url("**/?session=*")
+        shared_url = first.url
+        assert len(parse_qs(urlsplit(shared_url).query)["session"][0]) == 48
+        second.goto(shared_url)
+        for page in (first, second):
+            expect(page.locator(".pp-session-bar output")).to_contain_text(version, timeout=15000)
+            page.wait_for_function(
+                """async () => (await window.passportEmu.call('ui', {})).json.text.includes('设备连接')""",
+                timeout=15000,
+            )
+            page.wait_for_function(
+                """() => document.querySelector('canvas.glass').getContext('2d').getImageData(0, 0, 240, 320)
+                    .data.some((value) => value > 0)""", timeout=10000,
+            )
+        first.keyboard.press("Enter")
+        second.wait_for_function(
+            """async () => (await window.passportEmu.call('ui', {})).json.text.includes('label "设置"')""",
+            timeout=15000,
+        )
+        second.locator('[data-mode-switch="advanced"]').click()
+        serial = second.locator(".console-input")
+        serial.fill("pp.status")
+        serial.press("Enter")
+        first.wait_for_function(
+            """async () => (await window.passportEmu.call('serial', {op: 'read'})).text.includes('"app":"PA-Terminal"')""",
+            timeout=12000,
+        )
+        first.close()
+        second.reload()
+        expect(second.locator(".pp-session-bar output")).to_contain_text(version)
+        state = second.evaluate("() => window.passportEmu.call('ui', {})")
+        assert 'label "设置"' in state["json"]["text"]
+        expect(local.locator(".pp-session-bar output")).to_have_text("")
+        second.on("dialog", lambda dialog: dialog.accept())
+        second.get_by_role("button", name="结束会话").click()
+        expect(second.locator(".pp-session-bar output")).to_contain_text("会话已结束")
+        second.reload()
+        expect(second.locator(".pp-session-bar output")).to_contain_text("会话不存在或已结束")
         assert not issues, issues
-        print(f"Browser pass | retained failure {fail} | replay {passed}", flush=True)
         browser.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="http://127.0.0.1:9451/")
+    parser.add_argument("--url", required=True)
     parser.add_argument("--version", default="0.2.1-preview.6")
-    choices = parser.parse_args()
-    check(choices.url, choices.version)
+    args = parser.parse_args()
+    check(args.url, args.version)
+    print("PassportSim stock and shared browser modes passed")

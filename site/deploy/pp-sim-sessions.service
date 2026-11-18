@@ -1,0 +1,14 @@
+[Unit]
+Description=PassportSim shared runtime for PP firmware
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workspace/pp-firmware/site
+ExecStart=/usr/bin/python3 %h/workspace/pp-firmware/site/tools/pp_lab.py sim serve --group 101
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=20
+UMask=0077
+
+[Install]
+WantedBy=default.target
