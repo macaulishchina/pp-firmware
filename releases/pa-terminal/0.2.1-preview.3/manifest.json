@@ -1,0 +1,29 @@
+{
+  "application": "PA-Terminal",
+  "version": "0.2.1-preview.3",
+  "target": "esp32c3",
+  "idf_version": "5.5.3",
+  "hardware_acceptance": "pending",
+  "flash_files": [
+    {
+      "offset": "0x0",
+      "file": "bootloader.bin",
+      "bytes": 21024,
+      "sha256": "a6639853712a9c9514b6336f0effeb71a7d7bdad0de4eb5a0b26345aa7ece33a"
+    },
+    {
+      "offset": "0x8000",
+      "file": "partition-table.bin",
+      "bytes": 3072,
+      "sha256": "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3"
+    },
+    {
+      "offset": "0x10000",
+      "file": "pa_terminal.bin",
+      "bytes": 2969520,
+      "sha256": "751f0b3e9129e85ad14671449e9203a76aafdd8abfcbb5056afefdbc33293a1a"
+    }
+  ],
+  "description": "PA 地址和公开 CA 随固件提供，热点配网页只需填写 Wi-Fi。USB 更新保留原有设备配置。",
+  "release_channel": "preview"
+}

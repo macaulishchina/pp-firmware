@@ -1,0 +1,62 @@
+{
+  "verified_at": "2026-11-07T07:27:00.118616+00:00",
+  "target": "esp32c3",
+  "sdk": {
+    "version": "5.5.3",
+    "commit": "2c211b236707889e8400c4dc5644dd5c4ee071e0",
+    "clean": true,
+    "submodules": {
+      "components/bootloader/subproject/components/micro-ecc/micro-ecc": "24c60e243580c7868f4334a1ba3123481fe1aa48",
+      "components/bt/controller/lib_esp32": "1359f195ed834130739f0130322e1a1cd5464a11",
+      "components/bt/controller/lib_esp32c2/esp32c2-bt-lib": "6db3a4abe6f2f9ec60067a61732c8ef32557e821",
+      "components/bt/controller/lib_esp32c3_family": "16cda80aab0a008093592b7e304c77dcb3ac9ea4",
+      "components/bt/controller/lib_esp32c5/esp32c5-bt-lib": "bbff15b4d8cecad7c9e44b84bc32efc80cb3c6b2",
+      "components/bt/controller/lib_esp32c6/esp32c6-bt-lib": "d8b5341796e19d39aaa011dcdc3b71ca6f9450f0",
+      "components/bt/controller/lib_esp32h2/esp32h2-bt-lib": "27ca7c0a074804c382409d01f86f5f46b4382bca",
+      "components/bt/esp_ble_mesh/lib/lib": "e44762384ed104a0ebc78f134eeba5f3ab648ddc",
+      "components/bt/host/nimble/nimble": "039d2d62ed97fed632827fd51294f04068b2ca60",
+      "components/cmock/CMock": "eeecc49ce8af123cf8ad40efdb9673e37b56230f",
+      "components/cmock/CMock/vendor/c_exception": "71b47be7c950f1bf5f7e5303779fa99a16224bb6",
+      "components/cmock/CMock/vendor/unity": "cf949f45ca6d172a177b00da21310607b97bc7a7",
+      "components/esp_coex/lib": "ee5cd79583c02f23e43e62931ffb55f5a4992d0f",
+      "components/esp_phy/lib": "3d57415af6e4c92eff2c4c3463e20a51d7340aba",
+      "components/esp_wifi/lib": "e0befaa593277b4e80726079fbd521b4681754c2",
+      "components/heap/tlsf": "2867f6883a12920b1969ff9624c0ab0e4185c2ce",
+      "components/json/cJSON": "c859b25da02955fef659d658b8f324b5cde87be3",
+      "components/lwip/lwip": "fd432e4ee2cfb7f7f1c7eb7227e0173412e7b84e",
+      "components/mbedtls/mbedtls": "ffb280bb63c78bfec1e1ab55040671768c85c923",
+      "components/mqtt/esp-mqtt": "6af4446a48ea7fa54948edc4e62277ed70abb6e1",
+      "components/openthread/lib": "2e2d91a382ad6387ce77551c6adbb1514db12472",
+      "components/openthread/openthread": "a12ff0d0f54fd41954b45047fcdd08f302731c5f",
+      "components/openthread/openthread/third_party/mbedtls/repo": "e185d7fd85499c8ce5ca2a54f5cf8fe7dbe3f8df",
+      "components/openthread/openthread/third_party/mbedtls/repo/framework": "457996474728cb8e968ed21953b72f74d2f536b2",
+      "components/protobuf-c/protobuf-c": "abc67a11c6db271bedbb9f58be85d6f4e2ea8389",
+      "components/spiffs/spiffs": "0dbb3f71c5f6fae3747a9d935372773762baf852",
+      "components/unity/unity": "bf560290f6020737eafaa8b5cbd2177c3956c03f"
+    }
+  },
+  "python": "Python 3.12.12",
+  "python_lock_sha256": "e4fc03f8bbb36dc2395245860d2f9d65caa6e72df5ea323737a6b7ca42476fb2",
+  "cmake": "cmake version 4.4.4",
+  "ninja": "1.13.2.git.kitware.jobserver-pipe-1",
+  "tools": {
+    "riscv32-esp-elf": [
+      "esp-14.2.0_20251107"
+    ],
+    "riscv32-esp-elf-gdb": [
+      "16.3_20250913"
+    ],
+    "esp-rom-elfs": [
+      "20241011"
+    ],
+    "openocd-esp32": [
+      "v0.12.0-esp32-20251215"
+    ]
+  },
+  "acceptance": {
+    "activation": "passed",
+    "clean_firmware_build": "passed",
+    "host_tests": "passed",
+    "real_device": "pending"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "application": "PA-Terminal",
+  "version": "0.1.0",
+  "target": "esp32c3",
+  "idf_version": "5.5.3",
+  "hardware_acceptance": "pending",
+  "flash_files": [
+    {
+      "offset": "0x0",
+      "file": "bootloader.bin",
+      "bytes": 21024,
+      "sha256": "a438029e78cfed7aa08a395cf6b6a5d35f0ebcda8f2a10421c9c50b69acca44d"
+    },
+    {
+      "offset": "0x8000",
+      "file": "partition-table.bin",
+      "bytes": 3072,
+      "sha256": "420931e3f5af072d899b5357c043fd9f283bf165fc9df6113b6d43d82b48a06d"
+    },
+    {
+      "offset": "0x10000",
+      "file": "pa_terminal.bin",
+      "bytes": 2008800,
+      "sha256": "678c399f572a37fd5706ab8ea888e6139cba7b6b6548720338ab6948fa4113b1"
+    }
+  ],
+  "description": "PA 独立语音终端：中文、按键讲话、独立会话、任务结果。软件与构建通过，PP 真机待验收。"
+}

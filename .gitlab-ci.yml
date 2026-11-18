@@ -1,15 +1,15 @@
-# This file is a template, and might need editing before it works on your project.
-# Full project: https://gitlab.com/pages/plain-html
 pages:
+  image: node:22
   stage: deploy
   script:
-    - echo "Deploying ESP Launchpad pages ..."
-    - cp -r assets public/assets
-    - cp -r styles public/styles
-    - cp -r node_modules public/node_modules
-    - cp -r js public/js
-    - cp -r config public/config
-    - cp index.html public/
+    - cd site
+    - npm ci
+    - npm run build
+    - cp -R config dist/config
+    - cp -R assets dist/assets
+    - cp assets/favicon.ico dist/favicon.ico
+    - cp -R ../releases dist/firmware
+    - mv dist ../public
   artifacts:
     paths:
       - public

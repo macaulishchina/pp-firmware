@@ -1,0 +1,28 @@
+{
+  "application": "PPDemo",
+  "version": "0.2.0",
+  "target": "esp32c3",
+  "idf_version": "5.5.3",
+  "hardware_acceptance": "pending",
+  "flash_files": [
+    {
+      "offset": "0x0",
+      "file": "bootloader.bin",
+      "bytes": 21024,
+      "sha256": "242bb29be4c0ae27f717b78176b662f9e2cffdebae459fcf0fc8e0b63eceec54"
+    },
+    {
+      "offset": "0x8000",
+      "file": "partition-table.bin",
+      "bytes": 3072,
+      "sha256": "420931e3f5af072d899b5357c043fd9f283bf165fc9df6113b6d43d82b48a06d"
+    },
+    {
+      "offset": "0x10000",
+      "file": "ppdemo.bin",
+      "bytes": 1593312,
+      "sha256": "8f8bd2048798958a81ebe12317b9404dae726d522d846e1c89f384f5deae1ba1"
+    }
+  ],
+  "description": "PP 独立硬件体验与质检：屏幕、按键、录放音、电池、Wi-Fi、蓝牙、存储及休眠唤醒。已通过编译与镜像校验，真机待验收。"
+}

@@ -2,7 +2,49 @@ node_modules
 dist
 .sites-runtime/
 __pycache__/
+*.py[cod]
+*.tsbuildinfo
+.env
+.env.*
+/.vscode/
+/.idea/
 
 # Generated, public-safe PP lab summary. Full evidence stays in private/pp-lab.
-public/pp-demo/lab/status.json
-public/pp-demo/lab/.status-*
+/site/public/pp-demo/lab/status.json
+/site/public/pp-demo/lab/.status-*
+
+# Local deployment, test evidence and firmware build output.
+/private/
+/candidates/
+/runtime/
+*.elf
+*.map
+*.pem
+*.key
+*.sqlite*
+
+# Track the toolchain recipe, not platforms, downloads or virtual environments.
+/toolchain/*
+!/toolchain/README.md
+!/toolchain/activate.sh
+!/toolchain/environment.json
+!/toolchain/espidf.constraints.v5.5.txt
+!/toolchain/requirements-idf5.5-py3.12.lock.txt
+!/toolchain/font-tools/
+/toolchain/font-tools/*
+!/toolchain/font-tools/package.json
+!/toolchain/font-tools/package-lock.json
+
+# Public releases are paired with the catalog. Publish only the known image
+# parts, public package, metadata and notices in each immutable version.
+/releases/*/*/*
+!/releases/*/*/bootloader.bin
+!/releases/*/*/partition-table.bin
+!/releases/*/*/pa_terminal.bin
+!/releases/*/*/ppdemo.bin
+!/releases/*/*/firmware.zip
+!/releases/*/*/manifest.json
+!/releases/*/*/README.md
+!/releases/*/*/LICENSE.folotoy
+!/releases/*/*/LittleFS.LICENSE.txt
+!/releases/*/*/SourceHanSansSC.LICENSE.txt

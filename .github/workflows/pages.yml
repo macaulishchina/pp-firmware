@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,6 +29,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: site/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -38,6 +42,7 @@ jobs:
           cp -R config dist/config
           cp -R assets dist/assets
           cp assets/favicon.ico dist/favicon.ico
+          cp -R ../releases dist/firmware
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -45,7 +50,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: site/dist
 
   deploy:
     environment:

@@ -1,0 +1,8 @@
+[submodule "upstream/AI-Passport"]
+	path = upstream/AI-Passport
+	url = https://github.com/FoloToy/ai-passport.git
+	branch = main
+[submodule "upstream/passportsim"]
+	path = upstream/passportsim
+	url = https://github.com/BlackHole1/passportsim.git
+	branch = main

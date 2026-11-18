@@ -1,0 +1,28 @@
+{
+  "application": "PPDemo-Zh",
+  "version": "0.2.0",
+  "target": "esp32c3",
+  "idf_version": "5.5.3",
+  "hardware_acceptance": "pending",
+  "flash_files": [
+    {
+      "offset": "0x0",
+      "file": "bootloader.bin",
+      "bytes": 21024,
+      "sha256": "bc7b8b882ec16c69e8e0ec1057b72b87b2778dbabc157f850e76ab01bc0a57c8"
+    },
+    {
+      "offset": "0x8000",
+      "file": "partition-table.bin",
+      "bytes": 3072,
+      "sha256": "420931e3f5af072d899b5357c043fd9f283bf165fc9df6113b6d43d82b48a06d"
+    },
+    {
+      "offset": "0x10000",
+      "file": "ppdemo.bin",
+      "bytes": 1696384,
+      "sha256": "881e5ddf50be734828a23f65225301ebd94e1bae64989e0b1871e0ad5752b8c5"
+    }
+  ],
+  "description": "PPDemo 中文版：中文菜单、状态提示、人工评价和 Wi-Fi 配网页，内置中文字库。屏幕、按键、录放音、电池、无线、存储与休眠功能与英文版共用实现；真机待验收。"
+}
