@@ -29,10 +29,18 @@ def check(url, version):
         first.get_by_role("button", name="新建会话").click()
         first.wait_for_url("**/?session=*")
         shared_url = first.url
-        assert len(parse_qs(urlsplit(shared_url).query)["session"][0]) == 48
-        second.goto(shared_url)
+        shared_address = urlsplit(shared_url)
+        session = parse_qs(shared_address.query)["session"][0]
+        assert session.isascii() and session.isdecimal() and int(session) > 0
+        assert len(parse_qs(shared_address.fragment)["key"][0]) == 48
+        assert "key" not in parse_qs(shared_address.query)
+        second.goto(shared_address._replace(fragment="").geturl())
+        expect(second.locator(".pp-session-bar output")).to_have_text("请使用完整会话链接")
+        second.get_by_label("会话链接").fill(shared_url)
+        second.get_by_role("button", name="打开会话").click()
         for page in (first, second):
             expect(page.locator(".pp-session-bar output")).to_contain_text(version, timeout=15000)
+            expect(page.locator(".pp-session-bar strong")).to_have_text(f"共享会话 #{session}")
             page.wait_for_function(
                 """async () => (await window.passportEmu.call('ui', {})).json.text.includes('设备连接')""",
                 timeout=15000,

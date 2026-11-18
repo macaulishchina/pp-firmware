@@ -34,11 +34,20 @@ python3 tools/pp_lab.py status
 ## 用 PassportSim 验证真实固件
 
 `/pp-sim/` 是唯一的固件模拟网页。裸地址照常在浏览器里运行 PassportSim。通过「新建会话」
-选择已发布且有匹配调试符号的固件，或输入现有会话编号。打开 `/pp-sim/?session=编号`
-即可让几个浏览器与 AI 操作同一实例。每个人都能按键、查看屏幕和串口，也能结束会话。
-链接就是访问凭据，转发给参与这次调试的人。刷新或关闭一个浏览器后，实例仍由 Dell 保存。
+选择已发布且有匹配调试符号的固件。普通会话编号从 1 开始递增，结束或替换会话后也继续发号。
+浏览器通过「复制链接」分享 `/pp-sim/?session=编号#key=凭据`。打开完整链接，或将它粘贴到「打开会话」，
+即可让几个浏览器与 AI 操作同一实例。持有链接的人都能按键、查看屏幕和串口，也能结束普通会话。
+刷新或关闭一个浏览器后，实例仍由 Dell 保存。本机 CLI 通过私有控制接口使用整数编号。
 
-服务读取 `site/config/passportsim.toml`。默认 `max_sessions = 5`。达到上限时销毁最久未使用
+序号保存在 PP Lab 私有状态目录的 `sim/control/session-ids.sqlite3`，服务重启时继续递增。
+分配后启动失败可能留下空号。迁移实例时保留该数据库。服务进程重启后，普通会话需要重新创建。
+
+**0 号保留给 AI 开发。** 它不占普通会话配额，也不会因空闲、顶替或手动结束而关闭。
+开发者加载新固件后，已打开的页面会自动切到新画面。固件启动失败时保留上一轮。
+固定链接和凭据跨服务重启有效，重启后页面等待 AI 再次加载固件。
+共享链接可通过本机 `python3 tools/pp_lab.py sim session link 0` 获取。
+
+服务读取 `site/config/passportsim.toml`。默认 `max_sessions = 5`，只统计普通会话。达到上限时销毁最久未使用
 的空闲实例，有浏览器连接、断开后短暂重连期内或正在运行场景的实例不参与容量回收。
 `max_sessions = 0` 关闭数量限制与 LRU 回收。
 
@@ -50,7 +59,7 @@ python3 tools/pp_lab.py status
 `session_idle_timeout_hours = 24` 控制自动销毁的空闲时限，即使名额充足也生效。重新加入、
 按键、串口写入等有效操作及本机查询会重新计时。网页挂着时的心跳和自动刷新不会续期，
 正在执行的命令或验收场景会先完成。销毁后会话链接失效，已保存的验收记录仍可通过 CLI 查看。
-配置重启服务后生效，重启会结束共享实例。浏览器本地模拟与独立命令行验收不计入共享名额。
+配置重启服务后生效，重启会结束当时运行的模拟器。浏览器本地模拟与独立命令行验收不计入共享名额。
 
 ### 命令行开发流程
 
@@ -65,17 +74,18 @@ python3 tools/pp_lab.py sim inspect SIM_RUN --serial
 python3 tools/pp_lab.py sim replay SIM_RUN
 ```
 
-给 `sim run`、`sim replay` 或 `sim iterate` 加 `--share` 会在标准错误输出共享会话链接。
+`sim run`、`sim replay`、`sim iterate` 默认使用 0 号，并在标准错误输出固定链接。
+可用 `--isolated` 独立执行。显式选择 `--wait-for-slot` 或 `--replace-oldest` 时使用普通会话。
 短场景可以加 `--wait-for-join`，等待浏览器接入，最多 30 秒。执行场景期间会话显示进度，
-手动写入暂缓。完成后同一会话可继续操作。也可启动一个手动调试会话后按需发送指令。
+手动写入暂缓。完成后同一会话可继续操作。手动加载固件的 `sim session new` 也默认使用 0 号。
 
 ```sh
 python3 tools/pp_lab.py sim session new --candidate CANDIDATE_RUN
-python3 tools/pp_lab.py sim session status SESSION_ID
-python3 tools/pp_lab.py sim session press SESSION_ID ok
-python3 tools/pp_lab.py sim session send SESSION_ID pp.status
-python3 tools/pp_lab.py sim session serial SESSION_ID
-python3 tools/pp_lab.py sim session screen SESSION_ID screen.png
+python3 tools/pp_lab.py sim session status 0
+python3 tools/pp_lab.py sim session press 0 ok
+python3 tools/pp_lab.py sim session send 0 pp.status
+python3 tools/pp_lab.py sim session serial 0
+python3 tools/pp_lab.py sim session screen 0 screen.png
 python3 tools/pp_lab.py sim session end SESSION_ID
 ```
 

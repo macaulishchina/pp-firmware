@@ -285,7 +285,8 @@ def worker(lab, action, config, timeout=None):
 def browser_run(lab, image, scenario, args, config, expected=None):
     options = {
         **config, "image": image, "scenario": scenario, "fault": args.fault, "expected": expected,
-        "share": args.share or args.wait_for_join or args.wait_for_slot or args.replace_oldest,
+        "share": not args.isolated,
+        "development": not (args.wait_for_slot or args.replace_oldest),
         "wait": args.wait_for_join, "wait_for_slot": args.wait_for_slot,
         "replace_oldest": args.replace_oldest,
     }
@@ -298,6 +299,7 @@ def capacity_options(command):
     choices.add_argument("--wait-for-slot", action="store_true", help="Wait in the shared-session queue")
     choices.add_argument("--replace-oldest", action="store_true",
                          help="Replace the least recently active instance if all slots are busy")
+    return choices
 
 
 def configure(parser):
@@ -308,14 +310,16 @@ def configure(parser):
     serve.add_argument("--group", type=int, help="Group that can connect to the public Unix socket")
     session = commands.add_parser("session", help="Control a shared instance locally")
     operations = session.add_subparsers(dest="operation", required=True)
-    new = operations.add_parser("new", help="Start a persistent shared instance")
+    new = operations.add_parser("new", help="Load firmware in AI development session 0 by default")
     source = new.add_mutually_exclusive_group(required=True)
     source.add_argument("--version")
     source.add_argument("--candidate")
     capacity_options(new)
+    link = operations.add_parser("link", help="Print the permanent link for AI development session 0")
+    link.add_argument("session_id", nargs="?", type=int, choices=[0], default=0)
     for name in ("status", "serial", "screen", "end", "press", "send"):
         operation = operations.add_parser(name)
-        operation.add_argument("session_id")
+        operation.add_argument("session_id", help="Session number returned by session new")
         if name == "screen":
             operation.add_argument("output", type=Path)
         elif name == "press":
@@ -346,8 +350,9 @@ def configure(parser):
     iterate.add_argument("--case", default="offline-maintenance")
     iterate.add_argument("--fault", action="store_true")
     for action in (run, replay, iterate):
-        capacity_options(action)
-        action.add_argument("--share", action="store_true", help="Print a PassportSim session link")
+        capacity_options(action).add_argument("--isolated", action="store_true",
+                                              help="Run locally without a shared session")
+        action.add_argument("--share", action="store_true", help="Use the default shared development session")
         action.add_argument("--wait-for-join", action="store_true",
                             help="Share and wait up to 30 seconds for a browser to join")
 
@@ -356,6 +361,8 @@ def execute(args, build: Callable[[], str | None]):
     lab = SimLab(args.state_dir.resolve(), args.pa_root.resolve())
     command = args.sim_command
     config = service_config(args.config)
+    if getattr(args, "isolated", False) and (args.share or args.wait_for_join):
+        raise ValueError("--isolated cannot be combined with --share or --wait-for-join")
     if command == "serve":
         return worker(lab, "serve", {**config, "socket": str(args.socket.resolve()), "group": args.group})
     if command == "session":

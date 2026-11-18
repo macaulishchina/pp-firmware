@@ -3,14 +3,14 @@ import { LIT_PANEL, type RawFrame } from "../../../../upstream/passportsim/web/s
 import { EventKind, RingId } from "../../../../upstream/passportsim/web/src/worker/layout";
 import { sessionClient, type SessionState } from "./session-client";
 
-export function openSession(id: string, onNote: (note: string) => void) {
+export function openSession(id: number, key: string, onNote: (note: string) => void) {
   const mount = document.getElementById("app");
   if (!mount) throw new Error("PassportSim mount is missing");
   let state: SessionState | undefined;
   let receivedFrame = "";
   let serial = "";
   let booting = true;
-  const transport = sessionClient(id, update, (note) => {
+  const transport = sessionClient(id, key, update, (note) => {
     page.setLease("agent");
     onNote(note);
   });

@@ -1,11 +1,12 @@
 """Shared PassportSim instances and their public and local control interfaces."""
 import asyncio
 from collections import deque
-from contextlib import suppress
+from contextlib import closing, suppress
 import json
 import os
 import re
 import secrets
+import sqlite3
 from time import monotonic
 
 from aiohttp import WSMsgType, web
@@ -15,13 +16,18 @@ from pp_sim import DEFAULT_SESSION_IDLE_HOURS
 from pp_sim_runtime import run_site, runtime
 
 
-SESSION_ID = re.compile(r"[a-f0-9]{48}")
+# IDs travel as JSON numbers and must round-trip exactly in browsers.
+MAX_SESSION_ID = 2**53 - 1
+SESSION_ID = re.compile(r"0|[1-9][0-9]{0,15}")
+ACCESS_KEY = re.compile(r"[a-f0-9]{48}")
+LOCAL_REQUEST = object()
 BUTTONS = {"up", "ok", "down", "power"}
 MAX_PEERS = 16
 TICK_SECONDS = 0.25
 REJOIN_SECONDS = 10
 IDLE_ENDED = "会话因空闲超时已结束"
 REPLACED_ENDED = "该会话已被新建会话顶掉"
+DEVELOPMENT_WAITING = "等待 AI 启动开发固件"
 MAX_WAITERS = 12
 
 
@@ -36,9 +42,48 @@ def at_capacity():
     return SessionError("所有模拟实例都在使用中", code="capacity")
 
 
+def next_session_id(path):
+    with closing(sqlite3.connect(path)) as database, database:
+        database.execute("""
+            CREATE TABLE IF NOT EXISTS session_sequence (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                last_id INTEGER NOT NULL CHECK (last_id >= 0)
+            )
+        """)
+        database.execute("INSERT OR IGNORE INTO session_sequence VALUES (1, 0)")
+        rows = database.execute("""
+            UPDATE session_sequence SET last_id = last_id + 1
+            WHERE singleton = 1 AND last_id < ? RETURNING last_id
+        """, (MAX_SESSION_ID,)).fetchall()
+        if not rows:
+            raise SessionError("会话编号已耗尽", 503)
+        return rows[0][0]
+
+
+def development_access_key(path):
+    try:
+        with closing(sqlite3.connect(path)) as database, database:
+            database.execute("""
+                CREATE TABLE IF NOT EXISTS development_access (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    access_key TEXT NOT NULL
+                )
+            """)
+            database.execute("INSERT OR IGNORE INTO development_access VALUES (1, ?)",
+                             (secrets.token_hex(24),))
+            key, = database.execute("SELECT access_key FROM development_access WHERE singleton = 1").fetchone()
+    except sqlite3.Error as exc:
+        raise RuntimeError("无法读取 AI 开发会话凭据") from exc
+    if not isinstance(key, str) or not ACCESS_KEY.fullmatch(key):
+        raise RuntimeError("AI 开发会话凭据无效")
+    return key
+
+
 class Session:
-    def __init__(self, ident, image, machine, idle_timeout):
+    def __init__(self, ident, image, machine, idle_timeout, *, access_key=None):
         self.ident = ident
+        self.access_key = access_key if access_key is not None else secrets.token_hex(24)
+        self.generation = secrets.token_hex(12) if ident == 0 else None
         self.image = image
         self.machine = machine
         self.idle_timeout = idle_timeout
@@ -59,6 +104,9 @@ class Session:
         self.closed = False
         self.closed_message = "会话已结束"
 
+    def share(self):
+        return {"session": self.ident, "key": self.access_key}
+
     def touch(self):
         self.last_used = self.last_access = monotonic()
 
@@ -66,7 +114,8 @@ class Session:
         return not (self.peers or self.busy or self.lock.locked() or self.rejoin_until > now)
 
     def expired(self, now):
-        return not (self.busy or self.lock.locked()) and now - self.last_access >= self.idle_timeout
+        return (self.ident != 0 and not (self.busy or self.lock.locked())
+                and now - self.last_access >= self.idle_timeout)
 
     async def capture(self):
         try:
@@ -87,7 +136,7 @@ class Session:
             self.running = False
             self.snapshot = {
                 **self.snapshot, "type": "state", "failed": True, "running": False,
-                "busy": self.busy, "activity": "模拟器响应失败，请结束会话并新建",
+                "busy": self.busy, "activity": "模拟器响应失败，请重新加载固件",
                 "revision": self.snapshot.get("revision", 0) + 1,
             }
         for peer in self.peers:
@@ -213,26 +262,98 @@ class Session:
 
 
 class Sessions:
-    def __init__(self, lab, engine, limit, idle_timeout=DEFAULT_SESSION_IDLE_HOURS * 3600):
+    def __init__(self, lab, engine, limit, idle_timeout=DEFAULT_SESSION_IDLE_HOURS * 3600, *,
+                 sequence_path):
         self.lab = lab
         self.engine = engine
         self.limit = limit
         self.idle_timeout = idle_timeout
+        self.sequence_path = sequence_path
+        self.development_key = development_access_key(sequence_path)
+        self.development = None
+        self.development_creating = asyncio.Lock()
         self.items = {}
         self.creating = asyncio.Lock()
         self.recent_requests = deque()
         self.waiters = deque()
         self.replaced = deque(maxlen=64)
 
-    def get(self, ident):
-        if not isinstance(ident, str) or not SESSION_ID.fullmatch(ident) or ident not in self.items:
-            if isinstance(ident, str) and ident in self.replaced:
+    def get(self, ident, *, key=LOCAL_REQUEST):
+        missing = SessionError("会话不存在或已结束", 404)
+        if type(ident) is not int or not 0 <= ident <= MAX_SESSION_ID:
+            raise missing
+        if key is not LOCAL_REQUEST and (not isinstance(key, str) or not ACCESS_KEY.fullmatch(key)):
+            raise missing
+        if ident == 0:
+            if key is not LOCAL_REQUEST and not secrets.compare_digest(key, self.development_key):
+                raise missing
+            if self.development is None:
+                raise SessionError(DEVELOPMENT_WAITING, 404, code="development_waiting")
+            return self.development
+        room = self.items.get(ident)
+        if room is None:
+            if any(ended_id == ident and (key is LOCAL_REQUEST or secrets.compare_digest(key, ended_key))
+                   for ended_id, ended_key in self.replaced):
                 raise SessionError(REPLACED_ENDED, 404)
-            raise SessionError("会话不存在或已结束", 404)
-        room = self.items[ident]
+            raise missing
+        if key is not LOCAL_REQUEST and not secrets.compare_digest(key, room.access_key):
+            raise missing
         if room.expired(monotonic()):
             raise SessionError(IDLE_ENDED, 404)
         return room
+
+    def development_share(self):
+        return {"session": 0, "key": self.development_key}
+
+    async def load_image(self, image, *, public):
+        try:
+            return await asyncio.to_thread(self.lab.image, image)
+        except (OSError, ValueError, KeyError) as exc:
+            raise SessionError("固件暂不可用" if public else str(exc), 400) from exc
+
+    async def boot(self, ident, image, assets, *, public=False, access_key=None):
+        try:
+            machine = await self.engine.boot(*assets)
+        except Exception as exc:
+            raise SessionError("模拟器启动失败" if public else str(exc), 503) from exc
+        room = Session(ident, image, machine, self.idle_timeout, access_key=access_key)
+        try:
+            await room.capture()
+            if room.snapshot.get("failed"):
+                raise SessionError("模拟器启动后无法读取画面", 503)
+        except BaseException:
+            await room.close()
+            raise
+        return room
+
+    async def create_development(self, image):
+        if not isinstance(image, str):
+            raise SessionError("请选择固件", 400)
+        if self.development_creating.locked():
+            raise SessionError("AI 开发会话正在加载固件")
+        async with self.development_creating:
+            previous = self.development
+            if previous is not None and previous.busy:
+                raise SessionError("AI 开发会话正在验收")
+            assets = await self.load_image(image, public=False)
+            room = await self.boot(0, image, assets, access_key=self.development_key)
+            if previous is not None:
+                try:
+                    async with previous.lock:
+                        if previous.busy:
+                            raise SessionError("AI 开发会话正在验收")
+                        previous.closed = True
+                        previous.closed_message = "AI 已切换固件，正在重新连接"
+                        self.development = room
+                except BaseException:
+                    await room.close()
+                    raise
+            else:
+                self.development = room
+            room.ticker = asyncio.create_task(room.tick())
+            if previous is not None:
+                await previous.close()
+            return room
 
     async def expire(self):
         now = monotonic()
@@ -301,37 +422,29 @@ class Sessions:
         async with self.creating:
             if self.waiters and self.waiters[0] is not ticket and not replace:
                 raise at_capacity()
-            try:
-                assets = await asyncio.to_thread(self.lab.image, image)
-            except (OSError, ValueError, KeyError) as exc:
-                message = "固件暂不可用" if public else str(exc)
-                raise SessionError(message, 400) from exc
+            assets = await self.load_image(image, public=public)
             await self.expire()
+            if self.limit and len(self.items) >= self.limit and not replace:
+                if self.idle_room(monotonic()) is None:
+                    raise at_capacity()
+            try:
+                ident = await asyncio.to_thread(next_session_id, self.sequence_path)
+            except (OSError, sqlite3.Error) as exc:
+                raise SessionError("无法分配会话编号，请重试", 503) from exc
             if self.limit and len(self.items) >= self.limit:
-                room = self.idle_room(monotonic())
-                if room is None:
+                # A browser may have joined while the counter was being saved.
+                victim = self.idle_room(monotonic())
+                if victim is None:
                     if not replace:
                         raise at_capacity()
-                    room = min(self.items.values(), key=lambda item: item.last_access)
-                    room.closed_message = REPLACED_ENDED
-                    self.replaced.append(room.ident)
-                    self.remove(room, replace=True)
+                    victim = min(self.items.values(), key=lambda item: item.last_access)
+                    victim.closed_message = REPLACED_ENDED
+                    self.replaced.append((victim.ident, victim.access_key))
+                    self.remove(victim, replace=True)
                 else:
-                    self.remove(room)
-                await room.close()
-            try:
-                machine = await self.engine.boot(*assets)
-            except Exception as exc:
-                raise SessionError("模拟器启动失败" if public else str(exc), 503) from exc
-            ident = secrets.token_hex(24)
-            room = Session(ident, image, machine, self.idle_timeout)
-            try:
-                await room.capture()
-                if room.snapshot.get("failed"):
-                    raise SessionError("模拟器启动后无法读取画面", 503)
-            except BaseException:
-                await machine.close()
-                raise
+                    self.remove(victim)
+                await victim.close()
+            room = await self.boot(ident, image, assets, public=public)
             if public or ticket is not None:
                 room.rejoin_until = monotonic() + REJOIN_SECONDS
             room.ticker = asyncio.create_task(room.tick())
@@ -339,6 +452,8 @@ class Sessions:
             return room
 
     def remove(self, room, *, replace=False):
+        if room.ident == 0:
+            raise SessionError("0 号会话保留用于 AI 开发")
         if room.closed:
             raise SessionError("会话已结束", 404)
         if not replace and (room.busy or room.lock.locked()):
@@ -347,7 +462,12 @@ class Sessions:
         room.closed = True
 
     async def close(self):
-        await asyncio.gather(*(room.close() for room in self.items.values()), return_exceptions=True)
+        rooms = list(self.items.values())
+        if self.development is not None:
+            self.development.closed_message = DEVELOPMENT_WAITING
+            rooms.append(self.development)
+            self.development = None
+        await asyncio.gather(*(room.close() for room in rooms), return_exceptions=True)
         self.items.clear()
 
     async def run(self, room, spec, scenario, *, expected=None, fault=False, wait=False):
@@ -440,7 +560,7 @@ async def waiting_socket(request, sessions, *, public, prepare=None, on_created=
             room = waiting.result()
             if not disconnect.done():
                 await asyncio.wait_for(
-                    ws.send_json({"type": "created", "session": room.ident}), timeout=5,
+                    ws.send_json({"type": "created", **room.share()}), timeout=5,
                 )
                 delivered = True
                 if on_created:
@@ -474,7 +594,7 @@ def public_app(sessions):
             raise web.HTTPForbidden()
         data = await request_data(request)
         room = await sessions.create(data.get("image"), public=True, replace=data.get("replace_oldest") is True)
-        return web.json_response({"session": room.ident}, status=201, headers={"Cache-Control": "no-store"})
+        return web.json_response(room.share(), status=201, headers={"Cache-Control": "no-store"})
 
     async def wait(request):
         if not same_origin(request):
@@ -489,11 +609,17 @@ def public_app(sessions):
         room = None
         try:
             hello = await ws.receive_json(timeout=5)
-            room = sessions.get(hello.get("session") if isinstance(hello, dict) else None)
+            if not isinstance(hello, dict):
+                raise SessionError("会话链接无效", 400)
+            room = sessions.get(hello.get("session"), key=hello.get("key"))
             if len(room.peers) >= MAX_PEERS:
                 raise SessionError("该会话连接数已满")
         except (SessionError, TimeoutError, ValueError, TypeError) as exc:
-            await ws.send_json({"type": "ended", "message": str(exc) if isinstance(exc, SessionError) else "会话编号无效"})
+            waiting = isinstance(exc, SessionError) and exc.code == "development_waiting"
+            await ws.send_json({
+                "type": "waiting" if waiting else "ended",
+                "message": str(exc) if isinstance(exc, SessionError) else "会话链接无效",
+            })
             await ws.close()
             return ws
 
@@ -510,7 +636,8 @@ def public_app(sessions):
                     peer.clear()
                     if room.closed:
                         await asyncio.wait_for(
-                            ws.send_json({"type": "ended", "message": room.closed_message}), timeout=5,
+                            ws.send_json({"type": "waiting" if room.ident == 0 else "ended",
+                                          "message": room.closed_message}), timeout=5,
                         )
                         break
                     await asyncio.wait_for(ws.send_json(room.snapshot), timeout=5)
@@ -584,14 +711,29 @@ def control_app(sessions):
         validate(data)
         room = await sessions.create(data.get("image"), replace=data.get("replace_oldest") is True)
         await start_scenario(room, data)
-        return web.json_response({"session": room.ident}, status=201)
+        return web.json_response(room.share(), status=201)
 
     async def wait(request):
         return await waiting_socket(request, sessions, public=False, prepare=validate, on_created=start_scenario)
 
+    async def development_link(_):
+        return web.json_response(sessions.development_share(), headers={"Cache-Control": "no-store"})
+
+    async def development_create(request):
+        data = await request_data(request)
+        validate(data)
+        room = await sessions.create_development(data.get("image"))
+        await start_scenario(room, data)
+        return web.json_response({**room.share(), "generation": room.generation}, status=201,
+                                 headers={"Cache-Control": "no-store"})
+
     async def session(request):
-        room = sessions.get(request.match_info["ident"])
+        ident = request.match_info["ident"]
+        room = sessions.get(int(ident) if SESSION_ID.fullmatch(ident) else None)
         if request.method == "GET":
+            generation = request.query.get("generation")
+            if generation is not None and generation != room.generation:
+                raise SessionError("开发会话已开始下一轮，请查看该轮验收记录")
             room.touch()
             return web.json_response({"state": room.snapshot, "result": room.result})
         if request.method == "DELETE":
@@ -605,6 +747,8 @@ def control_app(sessions):
         return web.json_response(await room.command(None, data.get("cmd"), args))
 
     app.router.add_post("/sessions", create)
+    app.router.add_get("/development", development_link)
+    app.router.add_post("/development", development_create)
     app.router.add_get("/wait", wait)
     for method in ("GET", "POST", "DELETE"):
         app.router.add_route(method, "/sessions/{ident}", session)
@@ -617,7 +761,8 @@ async def serve(lab, limit, public_socket, private_socket, public_group, *, idle
     private_socket.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     private_socket.parent.chmod(0o700)
     async with runtime() as engine:
-        sessions = Sessions(lab, engine, limit, idle_timeout)
+        sessions = Sessions(lab, engine, limit, idle_timeout,
+                            sequence_path=private_socket.parent / "session-ids.sqlite3")
         reaper = asyncio.create_task(sessions.reap())
         try:
             async with run_site(control_app(sessions), web.UnixSite, private_socket, socket_mode=0o600):

@@ -16,38 +16,49 @@ export interface SessionState {
 
 type Reply = { ok?: string; err?: string };
 
-export function sessionClient(session: string, onState: (state: SessionState) => void, onNote: (note: string) => void) {
+export function sessionClient(session: number, key: string, onState: (state: SessionState) => void, onNote: (note: string) => void) {
   let socket: WebSocket;
   let ended = false;
   let synced = false;
   let seq = 0;
+  let reconnect: ReturnType<typeof setTimeout> | undefined;
   const pending = new Map<number, (reply: Reply) => void>();
   const fail = (message: string): Reply => ({ err: JSON.stringify({ code: "E_STATE", message }) });
 
   function connect() {
+    clearTimeout(reconnect);
     const address = new URL("./api/session", location.href);
     address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(address);
-    socket.addEventListener("open", () => socket.send(JSON.stringify({ session })));
-    socket.addEventListener("message", (event) => {
+    const connection = new WebSocket(address);
+    socket = connection;
+    let waiting = false;
+    connection.addEventListener("open", () => connection.send(JSON.stringify({ session, key })));
+    connection.addEventListener("message", (event) => {
+      if (socket !== connection) return;
       const data = JSON.parse(event.data);
       if (data.type === "state") {
+        waiting = false;
         synced = true;
         onState(data);
+      } else if (data.type === "waiting") {
+        waiting = true;
+        synced = false;
+        onNote(data.message);
       } else if (data.type === "ended") {
         ended = true;
         onNote(data.message);
-        socket.close();
+        connection.close();
       } else if (data.type === "reply") {
         pending.get(data.id)?.({ ok: data.ok, err: data.err });
       }
     });
-    socket.addEventListener("close", () => {
+    connection.addEventListener("close", () => {
+      if (socket !== connection) return;
       synced = false;
       for (const settle of pending.values()) settle(fail("连接中断，操作结果未确认"));
       if (!ended) {
-        onNote("连接中断，正在重连");
-        setTimeout(() => { if (!ended) connect(); }, 1200);
+        if (!waiting) onNote("连接中断，正在重连");
+        reconnect = setTimeout(() => { if (!ended) connect(); }, waiting ? 2000 : 1200);
       }
     });
   }
@@ -71,7 +82,10 @@ export function sessionClient(session: string, onState: (state: SessionState) =>
   };
   window.addEventListener("pagehide", () => {
     ended = true;
+    synced = false;
+    clearTimeout(reconnect);
     socket.close();
+    for (const settle of pending.values()) settle(fail("页面已离开，操作结果未确认"));
   });
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) {

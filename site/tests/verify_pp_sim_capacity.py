@@ -1,6 +1,6 @@
 """Exercise the full-capacity UI against a dedicated one-slot PassportSim service."""
 import argparse
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -25,8 +25,12 @@ def check(url):
         def wait_button(page):
             return page.get_by_role("button", name="等待空位")
 
+        def number(page):
+            return int(parse_qs(urlsplit(page.url).query)["session"][0])
+
         create(first)
         first.wait_for_url("**/?session=*", timeout=45000)
+        first_id = number(first)
         expect(first.get_by_role("button", name="结束会话")).to_be_enabled(timeout=15000)
         create(second)
         expect(wait_button(second)).to_be_visible(timeout=15000)
@@ -39,6 +43,8 @@ def check(url):
         expect(second.locator(".pp-session-bar output")).to_contain_text("第 1 位")
         end(first)
         second.wait_for_url("**/?session=*", timeout=45000)
+        second_id = number(second)
+        assert second_id > first_id
         expect(second.get_by_role("button", name="结束会话")).to_be_enabled(timeout=15000)
 
         create(third)
@@ -51,6 +57,7 @@ def check(url):
         replace.click()
         expect(second.locator(".pp-session-bar output")).to_contain_text("被新建会话顶掉", timeout=15000)
         third.wait_for_url("**/?session=*", timeout=45000)
+        assert number(third) > second_id
         expect(third.get_by_role("button", name="结束会话")).to_be_enabled(timeout=15000)
         end(third)
         expect(third.locator(".pp-session-bar output")).to_have_text("会话已结束")

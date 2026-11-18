@@ -1,10 +1,21 @@
 const params = new URLSearchParams(location.search);
 const id = params.get("session");
+type Share = { session: number; key: string };
+
+function readShare(address: URL): Share | null {
+  const number = address.searchParams.get("session");
+  const key = new URLSearchParams(address.hash.slice(1)).get("key");
+  if (!number || !/^(?:0|[1-9][0-9]{0,15})$/.test(number) || !Number.isSafeInteger(Number(number))
+      || !key || !/^[a-f0-9]{48}$/.test(key)) return null;
+  return { session: Number(number), key };
+}
+
+const share = readShare(new URL(location.href));
 const cn = (params.get("lang") || navigator.language).startsWith("zh");
 const words = cn ? {
   heading: "共享会话", create: "新建会话", join: "打开会话", copy: "复制链接",
-  session: "会话编号", image: "固件版本", end: "结束会话", local: "本地模拟",
-  copied: "已复制会话链接", invalid: "会话编号无效", connecting: "正在连接…", waiting: "正在启动…",
+  session: "会话链接", image: "固件版本", end: "结束会话", local: "本地模拟",
+  copied: "已复制会话链接", invalid: "请使用完整会话链接", connecting: "正在连接…", waiting: "正在启动…",
   endConfirm: "关闭这台模拟设备？所有成员都会断开。", unavailable: "共享会话服务暂不可用",
   wait: "等待空位", cancelWait: "取消等待", cancelled: "已取消等待", interrupted: "等待连接已断开",
   position: (number: number) => `正在等待空位 · 第 ${number} 位`,
@@ -12,8 +23,8 @@ const words = cn ? {
   replaceConfirm: "如果仍然满额，将结束最久未活动的会话。原成员会断开，正在运行的场景会中断。继续新建？",
 } : {
   heading: "Shared sessions", create: "New session", join: "Open session", copy: "Copy link",
-  session: "Session ID", image: "Firmware version", end: "End session", local: "Local emulator",
-  copied: "Session link copied", invalid: "Invalid session ID", connecting: "Connecting…", waiting: "Starting…",
+  session: "Session link", image: "Firmware version", end: "End session", local: "Local emulator",
+  copied: "Session link copied", invalid: "Enter the full session link", connecting: "Connecting…", waiting: "Starting…",
   endConfirm: "Stop this emulator for everyone in the session?", unavailable: "Session service unavailable",
   wait: "Wait for a slot", cancelWait: "Cancel wait", cancelled: "Wait cancelled", interrupted: "Queue disconnected",
   position: (number: number) => `Waiting for a slot · position ${number}`,
@@ -33,10 +44,15 @@ function button(text: string) {
   return node;
 }
 
-function url(session: string | null) {
+function url(link: Share | null) {
   const address = new URL(location.href);
-  if (session) address.searchParams.set("session", session);
-  else address.searchParams.delete("session");
+  if (link) {
+    address.searchParams.set("session", String(link.session));
+    address.hash = new URLSearchParams({ key: link.key }).toString();
+  } else {
+    address.searchParams.delete("session");
+    address.hash = "";
+  }
   return address;
 }
 
@@ -45,12 +61,11 @@ status.setAttribute("role", "status");
 const bar = element("section");
 bar.className = "pp-session-bar";
 bar.setAttribute("aria-label", words.heading);
-bar.append(element("strong", words.heading));
+bar.append(element("strong", share ? `${words.heading} #${share.session}` : words.heading));
 document.getElementById("app")?.before(bar);
 
 const input = element("input");
 input.type = "text";
-input.maxLength = 48;
 input.placeholder = words.session;
 input.setAttribute("aria-label", words.session);
 const join = button(words.join);
@@ -59,9 +74,17 @@ join.type = "submit";
 joinForm.append(input, join);
 joinForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const value = input.value.trim();
-  if (!/^[a-f0-9]{48}$/.test(value)) status.textContent = words.invalid;
-  else location.assign(url(value));
+  try {
+    const address = new URL(input.value.trim());
+    const link = readShare(address);
+    if (address.origin !== location.origin || address.pathname !== location.pathname || !link) {
+      status.textContent = words.invalid;
+      return;
+    }
+    location.assign(url(link));
+  } catch {
+    status.textContent = words.invalid;
+  }
 });
 
 if (id === null) {
@@ -104,7 +127,7 @@ if (id === null) {
       const data = await response.json();
       if (response.status === 409 && data.code === "capacity") wait.hidden = replace.hidden = false;
       if (!response.ok) throw new Error(data.error || words.unavailable);
-      location.assign(url(data.session));
+      location.assign(url(data));
     } catch (error) {
       status.textContent = error instanceof Error ? error.message : words.unavailable;
       create.disabled = false;
@@ -132,7 +155,7 @@ if (id === null) {
       if (data.type === "error") finishWaiting(data.message);
       if (data.type === "created") {
         waiting = undefined;
-        location.assign(url(data.session));
+        location.assign(url(data));
       }
     };
     socket.onclose = () => {
@@ -141,29 +164,32 @@ if (id === null) {
   };
   cancelWait.onclick = () => finishWaiting(words.cancelled);
 } else {
+  // Navigation between two links for the same number can change only the fragment.
+  window.addEventListener("hashchange", () => location.reload());
   const local = element("a", words.local);
   local.href = url(null).href;
   const copy = button(words.copy);
   const end = button(words.end);
+  end.hidden = share?.session === 0;
   bar.append(copy, end, local, joinForm, status);
   end.disabled = true;
-  if (!/^[a-f0-9]{48}$/.test(id)) {
+  if (!share) {
     status.textContent = words.invalid;
     copy.disabled = true;
   } else {
     status.textContent = words.connecting;
     const { openSession } = await import("./remote");
     document.documentElement.classList.add("pp-remote");
-    const session = openSession(id, (note) => {
+    const session = openSession(share.session, share.key, (note) => {
       status.textContent = note;
       end.disabled = !session.state() || Boolean(session.state()?.busy);
     });
     copy.onclick = async () => {
       try {
-        await navigator.clipboard.writeText(url(id).href);
+        await navigator.clipboard.writeText(url(share).href);
         status.textContent = words.copied;
       } catch {
-        input.value = id;
+        input.value = url(share).href;
         input.select();
       }
     };

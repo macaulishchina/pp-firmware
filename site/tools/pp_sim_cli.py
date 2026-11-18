@@ -9,7 +9,7 @@ import sys
 from time import monotonic
 from urllib.parse import urlencode
 
-from aiohttp import ClientSession, ClientTimeout, UnixConnector, WSMsgType
+from aiohttp import ClientSession, ClientTimeout, ContentTypeError, UnixConnector, WSMsgType
 
 import pp_scenario
 from pp_sessions import serve
@@ -29,12 +29,19 @@ async def control(lab):
 
         async def request(method, route, **data):
             async with client.request(method, f"http://localhost{route}", json=data or None) as response:
-                payload = await response.json()
+                try:
+                    payload = await response.json()
+                except ContentTypeError as exc:
+                    if route == "/development" and response.status == 404:
+                        raise ValueError("当前共享服务不支持 0 号开发会话，请同步更新共享服务") from exc
+                    raise ValueError(f"控制接口 HTTP {response.status}") from exc
                 if response.status >= 400:
                     raise ValueError(payload.get("error", f"控制接口 HTTP {response.status}"))
                 return payload
 
-        async def create(*, wait_for_slot=False, replace_oldest=False, **data):
+        async def create(*, development=False, wait_for_slot=False, replace_oldest=False, **data):
+            if development:
+                return await request("POST", "/development", **data)
             if not wait_for_slot:
                 return await request("POST", "/sessions", replace_oldest=replace_oldest, **data)
             async with client.ws_connect("http://localhost/wait", heartbeat=15) as socket:
@@ -46,7 +53,7 @@ async def control(lab):
                     if event["type"] == "queue":
                         print(f'正在等待空位 · 第 {event["position"]} 位', file=sys.stderr, flush=True)
                     elif event["type"] == "created":
-                        return {"session": event["session"]}
+                        return {"session": event["session"], "key": event.get("key")}
                     elif event["type"] == "error":
                         raise ValueError(event["message"])
                 raise ValueError("等待连接已断开")
@@ -54,8 +61,12 @@ async def control(lab):
         yield request, create
 
 
-def joined(base, ident):
-    return base + "?" + urlencode({"session": ident})
+def joined(base, created):
+    address = base + "?" + urlencode({"session": created["session"]})
+    # The local CLI can be updated before the separate shared-session service.
+    if key := created.get("key"):
+        address += "#" + urlencode({"key": key})
+    return address
 
 
 async def run(lab, options):
@@ -66,13 +77,17 @@ async def run(lab, options):
     if options["share"]:
         async with control(lab) as (request, create):
             created = await create(image=image, scenario=scenario, expected=expected, fault=fault,
+                                   development=options["development"],
                                    wait=options["wait"], wait_for_slot=options["wait_for_slot"],
                                    replace_oldest=options["replace_oldest"])
             ident = created["session"]
-            url = joined(options["public_base"], ident)
+            url = joined(options["public_base"], created)
             print(f"PassportSim: {url}", file=sys.stderr, flush=True)
+            route = f"/sessions/{ident}"
+            if generation := created.get("generation"):
+                route += "?" + urlencode({"generation": generation})
             while True:
-                result = (await request("GET", f"/sessions/{ident}"))["result"]
+                result = (await request("GET", route))["result"]
                 if result is not None:
                     if "error" in result:
                         raise ValueError(result["error"])
@@ -112,11 +127,16 @@ async def run(lab, options):
 async def session(lab, options):
     operation = options["operation"]
     async with control(lab) as (request, create):
+        if operation == "link":
+            share = await request("GET", "/development")
+            show({"session": share["session"], "url": joined(options["public_base"], share)})
+            return
         if operation == "new":
             image = f'release:{options["version"]}' if "version" in options else f'candidate:{options["candidate"]}'
-            created = await create(image=image, wait_for_slot=options["wait_for_slot"],
+            regular = options["wait_for_slot"] or options["replace_oldest"]
+            created = await create(image=image, development=not regular, wait_for_slot=options["wait_for_slot"],
                                    replace_oldest=options["replace_oldest"])
-            show({**created, "url": joined(options["public_base"], created["session"])})
+            show({"session": created["session"], "url": joined(options["public_base"], created)})
             return
         route = f'/sessions/{options["session_id"]}'
         if operation == "end":
