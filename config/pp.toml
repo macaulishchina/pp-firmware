@@ -1,6 +1,70 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.1-preview.6"]
+description = "改进分块播放、停播后录音、断线回执核对和深睡唤醒，保留原设备配置。"
+version = "0.2.1-preview.6"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.6/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.6/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.6/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.6/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.6/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.6/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2974448]
+image.esp32-c3.sha256 = ["a6639853712a9c9514b6336f0effeb71a7d7bdad0de4eb5a0b26345aa7ece33a", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "07122aa93c757d505d4c7bd307c821ca8606426debd87b8e035544c1659f1e8f"]
+
+["PA-Terminal · 0.2.1-preview.5"]
+description = "配对被拒时可直接进入设置，保留 Wi-Fi 重新配对。修复开机占位文字闪现。"
+version = "0.2.1-preview.5"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.5/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.5/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.5/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.5/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.5/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.5/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2971856]
+image.esp32-c3.sha256 = ["a6639853712a9c9514b6336f0effeb71a7d7bdad0de4eb5a0b26345aa7ece33a", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "44eb834994c0b7d8f853fb14731a15ab3447073df630d9a74a1faa430c37d49e"]
+
+["PA-Terminal · 0.2.1-preview.3"]
+description = "PA 地址和公开 CA 随固件提供，热点配网页只需填写 Wi-Fi。USB 更新保留原有设备配置。"
+version = "0.2.1-preview.3"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.3/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.3/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.3/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.3/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.3/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.3/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2969520]
+image.esp32-c3.sha256 = ["a6639853712a9c9514b6336f0effeb71a7d7bdad0de4eb5a0b26345aa7ece33a", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "751f0b3e9129e85ad14671449e9203a76aafdd8abfcbb5056afefdbc33293a1a"]
+
+["PA-Terminal · 0.2.1-preview.2"]
+description = "修复保留旧 Wi-Fi、未配对时 OK 无法进入重新配网的问题。USB 更新保留现有设备配置。"
+version = "0.2.1-preview.2"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.2/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.2/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.2/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.2/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.2/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.2/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2968640]
+image.esp32-c3.sha256 = ["a6639853712a9c9514b6336f0effeb71a7d7bdad0de4eb5a0b26345aa7ece33a", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "c99450cf65b872cfac11abd7d6d198039425eb7e66b89ff06724513656e6324e"]
 
 ["PA-Terminal · 0.2.1-preview.1"]
 description = "PP 交互终端预览版：中文语音、独立会话、任务消息与离线缓存。安装后按说明连接正式 PA 8047。"

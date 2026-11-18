@@ -1,23 +1,24 @@
 /** Provisioning and cloud settings fixture. No access point, credentials or PA requests. */
 export class DemoProvisioning {
-  constructor(volume = 65, mode = 'steer') {
+  constructor(volume = 45, mode = 'steer') {
     this.paired = true;
+    this.savedWifi = true;
+    this.rejected = false;
     this.stage = 'ready';
     this.version = 0;
     this.code = ''; this.expires = 0;
-    this.address = 'http://47.109.34.254:8047';
     this.name = '我的 PP';
     this.remoteVersion = 1; this.loadedVersion = 1;
     this.sync = '已同步 · v1'; this.reloadPending = false;
     this.config = { volume, mode, speechMode: 'brief', keepOnline: true,
-      sleepSeconds: 120, brightness: 85, textSize: 10, voiceRate: 1, offlineHistory: true,
+      sleepSeconds: 120, brightness: 65, textSize: 16, voiceRate: 1, offlineHistory: true, showImages: true,
       voice: '系统中文音色 A', networks: [
         { ssid: 'Home Wi-Fi', password: '', available: true },
         { ssid: '手机热点', password: '', available: true },
       ] };
   }
   hotspot() {
-    this.version++; this.paired = false; this.stage = 'hotspot';
+    this.version++; this.stage = 'hotspot';
     this.code = ''; this.reloadPending = false; this.sync = '未配对';
   }
   issueCode() {

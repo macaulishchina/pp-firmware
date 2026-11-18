@@ -1,255 +1,291 @@
-"""Browser acceptance for the isolated PP interaction study; never accesses real hardware."""
+"""Focused browser checks for the PP simulator. No hardware or paid services."""
+import argparse
 import asyncio
 import json
-import re
 from pathlib import Path
+
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from playwright.async_api import async_playwright, expect
 
 
-async def verify():
-    site = Path(__file__).resolve().parents[1]
-    app = web.Application()
-    app.router.add_static('/', site / 'public')
-    async with TestServer(app) as server, async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page(viewport={'width': 1440, 'height': 1100}, timezone_id='Asia/Shanghai')
-        errors, outside_requests = [], []
-        page.on('pageerror', lambda e: errors.append(str(e)))
-        page.on('request', lambda r: outside_requests.append(r.url) if not r.url.startswith(str(server.make_url('/'))) else None)
-        await page.goto(str(server.make_url('/pp-demo/')) + 'index.html')
-        ok = page.locator('#key-ok')
+async def verify(url, synthetic_report=False):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page(ignore_https_errors=True, viewport={"width": 1350, "height": 900})
+        base = url.rsplit("/", 1)[0] + "/"
+        errors, external = [], []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.on("request", lambda request: external.append(request.url) if not request.url.startswith(base) else None)
+        if synthetic_report:
+            await page.route("**/lab/status.json", lambda route: route.fulfill(json={
+                "schema": 1, "firmware": "0.2.1-preview.1", "revision": "0123456789abcdef",
+                "updated": "2026-11-09T00:00:00+00:00", "stages": {
+                    "device": {"title": "Windows 远程串口", "status": "waiting", "hint": "请唤醒 PP。"}
+                }, "manual": {}, "issues": [],
+            }))
+        await page.goto(url, wait_until="domcontentloaded")
+        screen, content = page.locator("#screen"), page.locator("#screen-content")
+        ok, up, down = (page.locator(f"#key-{key}") for key in ("ok", "up", "down"))
+
+        async def phase(expected, timeout=5000):
+            await expect(screen).to_have_attribute("data-phase", expected, timeout=timeout)
+
+        async def open_panel(name):
+            await page.locator(f'[data-panel="{name}"]').click()
+            await expect(page.locator(f"#panel-{name}")).to_be_visible()
 
         async def hold():
             await ok.hover()
             await page.mouse.down()
-            await page.wait_for_timeout(420)
-            await expect(page.locator('#screen')).to_have_attribute('data-phase','recording')
+            await phase("recording")
+            await expect(content).to_contain_text("你说的")
             await page.mouse.up()
-            await expect(page.locator('#screen')).to_have_attribute('data-phase','finalizing')
+            await phase("finalizing")
 
-        async def tap():
+        async def home(expected="idle"):
+            await up.hover()
+            await page.mouse.down()
+            await phase(expected)
+            await page.mouse.up()
+
+        await phase("idle")
+        assert await page.locator("#display").evaluate("e => e.width === 240 && e.height === 320")
+        assert await page.locator("#display").evaluate("""e => {
+          const pixel = (x,y) => Array.from(e.getContext('2d').getImageData(x,y,1,1).data).join(',');
+          return pixel(0,0) === '23,41,35,255' && pixel(12,29) === '52,68,60,255';
+        }""")
+        await expect(page.locator("#panel-conversation")).to_be_visible()
+        await expect(page.locator("#panel-setup")).to_be_hidden()
+        await expect(page.locator("#panel-debug")).to_be_hidden()
+        # Only the owning pointer can release this simulated ADC key. Neither
+        # a second pointer nor a keyboard long-UP may interrupt the recording.
+        await ok.evaluate("""el => el.addEventListener('pointerdown',
+            e => { el.testPointerId = e.pointerId; }, { once: true })""")
+        await ok.hover()
+        await page.mouse.down()
+        await phase("recording")
+        await ok.evaluate("""el => {
+            for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+                el.dispatchEvent(new PointerEvent(type, { pointerId: el.testPointerId + 1 }));
+            }
+        }""")
+        await page.keyboard.down("ArrowUp")
+        await page.wait_for_timeout(750)  # long-UP would otherwise navigate home
+        await phase("recording")
+        await page.keyboard.up("ArrowUp")
+        await ok.evaluate("el => el.releasePointerCapture(el.testPointerId)")
+        await page.mouse.move(0, 0)  # deliver lostpointercapture before the real release
+        await phase("idle")
+        await page.mouse.up()
+
+        # A held keyboard direction excludes pointer and assistive clicks. An
+        # abandoned OK gesture must not submit text when its stale keyup arrives.
+        await page.keyboard.down("ArrowDown")
+        await ok.hover()
+        await page.mouse.down()
+        assert not await ok.evaluate("el => el.classList.contains('pressed')")
+        await page.mouse.up()
+        await ok.evaluate("el => el.click()")
+        await page.keyboard.up("ArrowDown")
+        await page.keyboard.down("Space")
+        await phase("recording")
+        await page.evaluate("window.dispatchEvent(new Event('blur'))")
+        await phase("idle")
+        await page.keyboard.up("Space")
+        await ok.evaluate("el => el.click()")  # assistive activation when the key is free
+        await phase("menu")
+        await home()
+
+        await ok.dblclick()
+        await expect(screen).to_have_attribute("data-mode", "queue")
+        await phase("idle")
+        await page.reload()
+        await expect(screen).to_have_attribute("data-mode", "queue")
+        await ok.click()
+        await phase("menu")
+        await expect(content).to_contain_text("任务消息\n音量\n取消当前执行\n设置\n返回主页")
+        await down.click()
+        await ok.click()
+        await phase("volume")
+        await expect(content).to_contain_text("音量 45")
+        await home()
+
+        await hold()
+        await phase("processing")
+        await expect(screen).to_have_attribute("data-playing", "true", timeout=10000)
+        await up.click()
+        await expect(content).to_contain_text("音量 50")
+        await ok.click()
+        await expect(screen).to_have_attribute("data-playing", "false")
+        await phase("reply", 12000)
+        await expect(content).to_contain_text("当然可以")
+        await expect(screen).to_have_attribute("data-volume-feedback", "false")
+
+        await open_panel("debug")
+        await page.locator("#empty-input").click()
+        await hold()
+        await phase("idle")
+        await expect(content).to_contain_text("未检测到内容，请重新说。")
+        await page.locator("#network-toggle").click()
+        await phase("offline")
+        await up.click()
+        await phase("history")
+        await expect(content).to_contain_text("本地缓存")
+        await page.locator("#network-toggle").click()
+        await expect(page.locator("#network-toggle")).to_have_text("断开 Wi-Fi")
+
+        await open_panel("conversation")
+        await page.locator("#scenario-picker").select_option("image")
+        await hold()
+        await expect(screen).to_have_attribute("data-playing", "true", timeout=10000)
+        await ok.click()
+        await phase("reply", 12000)
+        await down.click()
+        await expect(screen).to_have_attribute("data-view", "image")
+        await expect(content).to_contain_text("160 × 96 合成色卡")
+        await up.click()
+        await expect(screen).to_have_attribute("data-view", "reply")
+
+        await page.locator("#scenario-picker").select_option("long-input")
+        await ok.hover()
+        await page.mouse.down()
+        await phase("recording")
+        # The real button is held while the workbench injects its limit condition.
+        await page.locator("#record-limit").evaluate("e => e.click()")
+        await page.mouse.up()
+        await phase("input-review")
+        await expect(content).to_contain_text("丢弃本次输入\n发送已识别文字\n查看完整转写")
+        await up.click()
+        await ok.click()
+        await phase("input-review-text")
+        await down.click()
+        await expect(content).not_to_contain_text("我想安排一个轻松一点的周末")
+        await ok.click()
+        await phase("input-review")
+        await ok.click()
+        await expect(content).to_contain_text("已丢弃，未执行")
+
+        await page.locator("#scenario-picker").select_option("task")
+        await hold()
+        await expect(page.locator("#task-complete")).to_be_visible(timeout=12000)
+        await page.locator("#task-complete").click()
+        if await screen.get_attribute("data-playing") == "true":
             await ok.click()
-            await page.wait_for_timeout(340)
+            await page.wait_for_timeout(320)
+        await ok.click()
+        await phase("menu")
+        await ok.click()
+        await phase("notices")
+        await ok.click()
+        await phase("notice")
+        await expect(content).to_contain_text("任务报告 · 电影推荐已整理好")
+        await ok.click()
+        await phase("notices")
+        await home()
 
-        async def choose_menu(label):
-            items = page.locator('.menu-list li')
-            names = await items.all_inner_texts()
-            target = next(i for i, name in enumerate(names) if name.startswith(label))
-            current = await items.evaluate_all("items => items.findIndex(item => item.classList.contains('selected'))")
-            for _ in range((target - current) % len(names)):
-                await page.locator('#key-down').click()
-            await tap()
+        await open_panel("setup")
+        await page.locator("#setup-first").click()
+        await phase("hotspot")
+        await expect(content).to_contain_text("http://192.168.4.1")
+        await expect(page.locator("#setup-wifi")).to_be_visible()
+        await expect(page.locator("#setup-pair")).to_be_hidden()
+        await expect(page.locator("#setup-wifi input[type=url], #setup-wifi textarea")).to_have_count(0)
+        await page.locator("#setup-fail").check()
+        await page.locator("#setup-connect").click()
+        await phase("unreachable")
+        async def select_from_start(index):
+            for _ in range(index):
+                await down.click()
+            await ok.click()
 
-        # Header is one shared telemetry view, with independently simulated Wi-Fi and PA.
-        await expect(page.locator('#signal')).to_have_attribute('data-level','3')
-        await expect(page.locator('#wifi-ssid')).to_have_count(0)
-        await expect(page.locator('#battery-percent')).to_have_text('85')
-        long_ssid = 'Home-Apartment-Living-Room-Guest'
-        await page.locator('#wifi-name').fill(long_ssid)
-        await page.locator('#wifi-strength').select_option('weak')
-        await expect(page.locator('#signal')).to_have_attribute('data-level','1')
-        await expect(page.locator('#signal')).to_have_attribute('aria-label',f'Wi-Fi {long_ssid}，信号弱，-82 dBm')
-        await page.locator('#pa-state').select_option('offline')
-        await expect(page.locator('#pa-link')).to_be_visible()
-        await expect(page.locator('#signal')).to_have_attribute('data-connected','true')
-        await expect(page.locator('#signal')).to_have_attribute('aria-label',f'Wi-Fi {long_ssid}，信号弱，-82 dBm')
-        await page.locator('#pa-state').select_option('online')
-        await expect(page.locator('#pa-link')).to_be_hidden()
-        await page.locator('#battery-level').evaluate("e => { e.value=12; e.dispatchEvent(new Event('input',{bubbles:true})); }")
-        await expect(page.locator('#battery-percent')).to_have_text('12')
-        await expect(page.locator('#battery')).to_have_attribute('data-low','true')
-        await page.locator('#clock-synced').uncheck()
-        await page.wait_for_timeout(300)
-        await expect(page.locator('#clock')).to_have_text('--:--')
-        await page.locator('#clock-synced').check()
-        await expect(page.locator('#clock')).not_to_have_text('--:--')
-        await tap()
-        await choose_menu('设置')
-        await choose_menu('网络状态')
-        await expect(page.locator('#screen-content')).to_contain_text(long_ssid)
-        await expect(page.locator('#screen-content')).to_contain_text('-82 dBm')
-        await expect(page.locator('#screen-content')).to_contain_text('8047')
-        await page.keyboard.press('Escape')
-        for width in (1280,1440,1920):
-            await page.set_viewport_size({'width':width,'height':1100})
-            assert await page.locator('.screen-top').evaluate('''e => {
-              const r=[...e.children].map(n=>n.getBoundingClientRect());
-              return r.every((item,i) => !i || r[i-1].right <= item.left)
-                && r.at(-1).right <= e.getBoundingClientRect().right;
-            }'''), width
-        await page.set_viewport_size({'width':1440,'height':1100})
-        await page.screenshot(path=str(site.parent / 'private' / 'pp-demo-header-long-ssid.png'), full_page=True)
-        await page.locator('#wifi-strength').select_option('off')
-        await expect(page.locator('#signal')).to_have_attribute('aria-label','Wi-Fi 未连接')
-        await expect(page.locator('#signal')).to_have_attribute('data-connected','false')
-        await expect(page.locator('#pa-state')).to_be_disabled()
-        await page.locator('#wifi-strength').select_option('strong')
-        await page.locator('#wifi-name').fill('Home Wi-Fi')
-        await page.locator('#battery-level').evaluate("e => { e.value=85; e.dispatchEvent(new Event('input',{bubbles:true})); }")
-        await page.screenshot(path=str(site.parent / 'private' / 'pp-demo-desktop.png'), full_page=True)
-        await hold()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','processing')
-        await expect(page.locator('#speech-track')).to_be_visible(timeout=10000)
+        async def open_maintenance():
+            await ok.click()
+            await phase("settings")
+            await select_from_start(3)
+            await phase("maintenance")
+
+        await open_maintenance()
+        await select_from_start(2)
+        await phase("device-reset")
+        await expect(content).to_contain_text("重新配网？")
         await ok.click()
-        await expect(page.locator('#speech-track')).to_be_hidden()
-        await tap()
-        await expect(page.locator('#screen-content')).to_contain_text('操作菜单')
-        await page.keyboard.press('Escape')
-        await page.evaluate("window.phases=[];window.phaseObserver=new MutationObserver(()=>phases.push(document.querySelector('#screen').dataset.phase));phaseObserver.observe(document.querySelector('#screen'),{attributes:true,attributeFilter:['data-phase']})")
-        await ok.dblclick(delay=90)
-        await expect(page.locator('#mode-badge')).to_have_attribute('data-mode','queue')
-        await expect(page.locator('#mode-badge')).to_have_attribute('aria-label','当前排队，双击 OK 切换')
-        mode_text = await page.locator('#mode-badge').inner_text()
-        assert not any(word in mode_text for word in ('引导','排队'))
-        assert 'recording' not in await page.evaluate('phases')
-        await page.evaluate('phaseObserver.disconnect()')
-        await page.reload()
-        await expect(page.locator('#mode-badge')).to_have_attribute('data-mode','queue')
-        await expect(page.locator('.screen-identity')).to_have_count(0)
-        await page.locator('#recognition-failure').click()
-        await hold()
-        await expect(page.locator('#screen-content')).to_contain_text('这次没听清')
-        await hold()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','processing')
-        await page.locator('#pa-state').select_option('offline')
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','offline')
-        await tap()
-        await expect(page.locator('#screen-content')).to_contain_text('操作菜单')
-        await page.keyboard.press('Escape')
-        await page.locator('#pa-state').select_option('online')
-        await expect(page.locator('#screen')).not_to_have_attribute('data-phase','offline')
-        await page.locator('[data-scenario=clarify]').click()
-        await hold()
-        await expect(page.locator('#screen-content')).to_contain_text('你想几点提醒', timeout=10000)
-        await expect(page.locator('#utterance')).to_contain_text('晚上八点')
-        await hold()
-        await expect(page.locator('#screen-content')).to_contain_text('已记下晚上八点', timeout=10000)
-        await page.locator('[data-scenario=long]').click()
-        await hold()
-        await expect(page.locator('#speech-track')).to_be_visible(timeout=10000)
-        await expect(page.locator('#screen-content .screen-kicker')).to_have_count(0)
-        await expect(page.locator('#screen-content')).not_to_contain_text('嘟嘟')
-        assert await page.locator('#screen-content').evaluate('e => e.clientHeight / e.closest(".screen").clientHeight > .70')
-        await page.screenshot(path=str(site.parent / 'private' / 'pp-demo-compact-reply.png'),full_page=True)
-        await page.locator('#device').screenshot(path=str(site.parent / 'private' / 'pp-demo-device-reply.png'))
-        await page.locator('#key-up').click()
-        await expect(page.locator('#volume-toast')).to_be_visible()
+        await phase("maintenance")
+        await home("unreachable")
+        await open_maintenance()
+        await select_from_start(2)
+        await down.click()
         await ok.click()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','reply',timeout=30000)
-        total_pages = int((await page.locator('#page-number').inner_text()).split('/')[1])
-        for _ in range(total_pages - 1): await page.locator('#key-up').click()
-        await page.locator('#key-down').click()
-        await expect(page.locator('#page-number')).to_contain_text(re.compile(r'2\s*/'))
-        await page.locator('#key-up').click()
-        for index in range(total_pages):
-            for width in (1280,1440,1920):
-                await page.set_viewport_size({'width':width,'height':1100})
-                assert await page.locator('#screen-content').evaluate('''e => {
-                  const text=e.querySelector('.screen-text').getBoundingClientRect();
-                  const area=e.getBoundingClientRect();
-                  return text.top >= area.top && text.bottom <= area.bottom;
-                }'''), (index,width)
-            if index < total_pages-1: await page.locator('#key-down').click()
-        await page.set_viewport_size({'width':1440,'height':1100})
-        await page.locator('[data-scenario=task]').click()
-        await hold()
-        await expect(page.locator('#task-complete')).to_be_enabled(timeout=10000)
-        await page.locator('#task-complete').click()
-        await expect(page.locator('#task-complete')).to_be_disabled()
-        await ok.click()  # stop playback immediately
-        await tap()  # open menu
-        await tap()  # task messages is the first menu entry
-        await expect(page.locator('#screen-content')).to_contain_text('电影推荐已整理好')
-        await tap()  # report detail
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','notice')
-        await expect(page.locator('#screen-content')).to_contain_text('电影推荐已整理好')
-        await expect(page.locator('.task-type')).to_have_text('任务报告')
-        await tap()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','notices')
-        await page.locator('#key-down').click(); await tap()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','menu')
-        await page.locator('#key-up').hover(); await page.mouse.down(); await page.wait_for_timeout(720); await page.mouse.up()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','idle')
-        await page.wait_for_timeout(200)
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','idle')
-        # Wake consumes one gesture; it never starts a recording.
-        await page.keyboard.press('Escape')
-        await tap()
-        await choose_menu('设置')
-        await choose_menu('休眠')
-        await expect(page.locator('#screen-content')).to_contain_text('休息一下')
-        await tap()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','idle')
-        # Losing a held pointer discards input instead of committing it.
-        await page.locator('[data-scenario=short]').click()
-        await ok.hover(); await page.mouse.down(); await page.wait_for_timeout(350)
-        await page.dispatch_event('#key-ok','pointercancel')
-        await page.mouse.up()
-        await expect(page.locator('#screen-content')).not_to_contain_text('正在听')
-        await expect(page.locator('#screen')).not_to_have_attribute('data-phase','processing')
-        # Extend only the scene declaration: no shell, controller or model changes.
-        extra = {
-            'id': 'travel', 'title': '出行清单', 'description': '独立场景声明',
-            'prompt': '帮我整理明天的出行清单。', 'reply': '已整理：证件、钥匙和水杯。这是通过场景声明接入的演示。',
-        }
-        source = (site / 'public/pp-demo/scenarios.js').read_text() + '\nscenarios.push(' + json.dumps(extra, ensure_ascii=False) + ');'
-        await page.route('**/scenarios.js', lambda route: route.fulfill(body=source, content_type='application/javascript'))
-        await page.reload()
-        await page.get_by_role('button', name='↗ 出行清单 独立场景声明').click()
-        await hold()
-        await expect(page.locator('#screen-content')).to_contain_text('已整理：证件', timeout=10000)
-        await page.unroute('**/scenarios.js')
-        await page.reload()
-        # PC keyboard shares the same hold/release behavior; key repeat cannot restart input.
-        await page.locator('body').click(position={'x': 20, 'y': 120})
-        await page.keyboard.down('Space')
-        await page.wait_for_timeout(320)
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','recording')
-        await page.keyboard.up('Space')
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','finalizing')
-        await page.reload()
-        for width in (1280, 1440, 1920):
-            await page.set_viewport_size({'width':width,'height':1100})
-            assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), width
-        await page.set_viewport_size({'width':1440,'height':1100})
-        await page.screenshot(path=str(site.parent / 'private' / 'pp-demo-desktop.png'),full_page=True)
-        # Bounded image delivery is part of the same conversation, never an image browser.
-        await page.locator('[data-scenario=image]').click()
-        await hold()
-        await expect(page.locator('#speech-track')).to_be_visible(timeout=10000)
+        await phase("hotspot")
+        await page.locator("#setup-fail").uncheck()
+        await page.locator("#setup-connect").click()
+        await phase("pairing")
+        await expect(page.locator("#setup-wifi")).to_be_hidden()
+        await expect(page.locator("#setup-pair")).to_be_visible()
+        code = (await content.text_content()).splitlines()[1]
+        assert len(code) == 8 and code.isdecimal()
+        await page.locator("#setup-code").fill(code)
+        await page.locator("#setup-bind").click()
+        await phase("idle")
+        await expect(page.locator("#cloud-settings")).to_be_visible()
+        assert not await page.locator("#cloud-settings").evaluate("e => e.open")
+        await page.locator("#cloud-settings > summary").click()
+        await page.locator("#setup-revoke").click()
+        await phase("revoked")
+        await down.click()
+        await phase("device-reset")
         await ok.click()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','reply',timeout=15000)
-        await page.locator('#key-down').click()
-        await expect(page.locator('.reply-image img')).to_be_visible()
-        await expect(page.locator('.reply-image img')).to_have_attribute('src','./color-check.svg')
-        # The explicit demo shortcut avoids making the software check wait a physical minute.
-        await page.locator('[data-scenario=long-input]').click()
-        await ok.hover(); await page.mouse.down(); await page.wait_for_timeout(350)
-        await page.evaluate("document.querySelector('#record-limit').click()")
-        await page.mouse.up()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','input-review')
-        await expect(page.locator('.menu-list li.selected')).to_have_text('丢弃本次输入')
-        await page.locator('#key-down').click(); await page.locator('#key-down').click(); await tap()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','input-review-text')
-        await page.locator('#key-down').click()
-        await expect(page.locator('#page-number')).to_contain_text(re.compile(r'2\s*/'))
-        await tap()
-        await expect(page.locator('.menu-list li.selected')).to_have_text('丢弃本次输入')
-        await tap()
-        await expect(page.locator('#screen')).not_to_have_attribute('data-phase','processing')
-        await page.locator('[data-scenario=short]').click()
-        await page.locator('#empty-input').click()
-        await hold()
-        await expect(page.locator('#screen')).to_have_attribute('data-phase','idle')
-        await expect(page.locator('#screen-hint')).to_have_text('未检测到内容，请重新说。')
-        await expect(page.locator('#screen-content .screen-text')).to_have_count(0)
+        await phase("revoked")
+        await open_maintenance()
+        await select_from_start(1)
+        await phase("revoked")
+        await open_maintenance()
+        await select_from_start(3)
+        await phase("device-reset")
+        await expect(content).to_contain_text("保留 Wi-Fi")
+        await ok.click()  # Cancel leaves the old identity and current selection intact.
+        await phase("maintenance")
+        await ok.click()
+        await down.click()
+        await ok.click()
+        await phase("pairing")
+        code = (await content.text_content()).splitlines()[1]
+        await ok.click()
+        await phase("settings")
+        await page.locator("#setup-code").fill(code)
+        await page.locator("#setup-bind").click()
+        await phase("settings")  # Successful handshake cannot take over a local page.
+        await home()
+        await open_panel("lab")
+        await expect(page.locator("#lab-meta")).to_contain_text("0.2.1-preview.1" if synthetic_report else "·")
+        await expect(page.locator("#lab-cases")).to_contain_text("真实收音与播报")
+        await page.locator("#lab-case").select_option("voice-playback")
+        await page.locator("#lab-note").fill("测试反馈：松开后仍显示收音")
+        async with page.expect_download() as result:
+            await page.locator("#lab-export").click()
+        download = await result.value
+        payload = json.loads((await download.path()).read_text())
+        assert payload["case"] == "voice-playback" and payload["result"] == "issue"
+        assert payload["note"] == "测试反馈：松开后仍显示收音"
+        if synthetic_report:
+            assert payload["revision"] == "0123456789abcdef"
         assert not errors, errors
-        assert not outside_requests, outside_requests
+        assert not external, external
         await browser.close()
-        print('Browser acceptance passed: hold/release, stop, menu, persistence, failure recovery, reconnect, clarification, paging, task report, sleep/wake, pointer loss; PC widths 1280–1920; no external requests.')
+        print("PP browser flows passed: native screen, controls, speech, history, image, review, pairing, feedback export")
 
 
-if __name__ == '__main__':
-    asyncio.run(verify())
+async def main(url=None):
+    if url:
+        await verify(url)
+        return
+    app = web.Application()
+    app.router.add_static("/", Path(__file__).resolve().parents[1] / "public")
+    async with TestServer(app) as server:
+        await verify(str(server.make_url("/pp-demo/index.html")), synthetic_report=True)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url")
+    asyncio.run(main(parser.parse_args().url))

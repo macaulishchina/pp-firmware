@@ -56,7 +56,7 @@ test('menus stay bounded and maintenance is explicitly below settings', () => {
   assert.ok(!m.menus.some(item => item.id === 'factory' || item.id === 'reload'));
   m.view = 'settings'; assert.equal(m.menus.length, 5);
   assert.ok(m.menus.some(item => item.id === 'maintenance'));
-  m.view = 'maintenance'; assert.equal(m.menus.length, 5);
+  m.view = 'maintenance'; assert.equal(m.menus.length, 6);
   assert.ok(m.menus.some(item => item.id === 'back'));
 });
 

@@ -1,15 +1,16 @@
 import { textPages } from './pagination.js';
 /** In-memory server fixture + separately bounded device cache. No network or persistence. */
 export class DemoHistory {
-  constructor(catalog, { maxRecords = 3, maxBytes = 4096 } = {}) {
+  constructor(catalog, { maxRecords = 3, maxBytes = 256 * 1024, paginate = textPages } = {}) {
     this.maxRecords = maxRecords; this.maxBytes = maxBytes;
     this.server = [];
+    this.paginate = paginate;
     this.cache = new Map();
     this.enabled = true;
     this.sequence = 0;
     const scenes = Object.values(catalog);
     for (const scene of [...scenes].reverse()) this.save(scene.prompt, scene.reply, false, scene.image);
-    for (const record of this.server.slice(0, 2).reverse()) this.remember(record);
+    for (const record of this.server.slice(0, maxRecords).reverse()) this.remember(record);
   }
   get bytes() { return [...this.cache.values()].reduce((sum, r) => sum + this.size(r), 0); }
   size(record) { return new TextEncoder().encode(JSON.stringify(record)).length; }
@@ -31,9 +32,9 @@ export class DemoHistory {
   }
   cached(id) {
     const record = this.cache.get(id);
-    if (record) this.remember(record);
     return record;
   }
+  get latestCachedId() { return [...this.cache.keys()].at(-1); }
   get latestId() { return this.sequence ? `demo-turn-${this.sequence}` : null; }
   neighborId(id, direction) {
     // Sequential IDs stand in for opaque server cursors in this fixed local fixture.
@@ -41,9 +42,9 @@ export class DemoHistory {
     return sequence >= Math.max(1, this.sequence - 63) && sequence <= this.sequence ? `demo-turn-${sequence}` : null;
   }
   read(id) { return this.server.find(record => record.id === id); }
-  pages(record, capacity = 104) {
+  pages(record) {
     const result = [['你说的', record.prompt], ['回复', record.reply]].flatMap(([role, text]) => {
-      return textPages(text, 13, Math.max(1, Math.min(8, Math.floor(capacity / 13)))).map(text => ({ role, text }));
+      return this.paginate(text).map(text => ({ role, text }));
     });
     if (record.image) result.push({ role: '回复 · 图片', text: '', image: record.image });
     return result;

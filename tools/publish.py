@@ -94,12 +94,15 @@ def update_catalog():
         entries.append((path.parent.relative_to(ROOT / "releases").as_posix(), manifest))
     # Keep each application's newest release first, so a fix becomes the default
     # without modifying the immutable files of previously published versions.
-    entries.sort(key=lambda item: (
-        item[0].split('/', 1)[0],
-        tuple(-int(part) for part in item[1]['version'].split('-', 1)[0].split('.')),
-        '-' in item[1]['version'],
-        item[1]['version'],
-    ))
+    def version_order(entry):
+        version, _, prerelease = entry[1]["version"].partition("-")
+        suffix = tuple(
+            (0, int(part)) if part.isdigit() else (1, part) for part in prerelease.split(".")
+        )
+        return tuple(map(int, version.split("."))), not prerelease, suffix
+
+    entries.sort(key=version_order, reverse=True)
+    entries.sort(key=lambda entry: entry[0].split("/", 1)[0])
     quote = lambda value: json.dumps(value, ensure_ascii=False)
     names = [f'{m["application"]} · {m["version"]}' for _, m in entries]
     text = 'esp_toml_version = 1.0\nfirmware_images_url = "/firmware/"\n'

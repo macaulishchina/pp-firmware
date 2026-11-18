@@ -10,6 +10,11 @@ import { resolvePublishedParts } from "../../lib/publishedFirmware";
 import type { AppFlashLinks } from "../modals/FlashStatusDialog";
 import { DeviceConnection } from "../DeviceConnection";
 
+// Operator guides can receive wording corrections after a firmware archive is sealed.
+const guides = import.meta.glob<string>("../../../config/readmes/*.md", {
+  eager: true, query: "?url&no-inline", import: "default",
+});
+
 export function QuickStartTab({goToConsole, onFlashStatus}: {
   goToConsole: () => void;
   onFlashStatus: (links: AppFlashLinks) => void;
@@ -60,10 +65,13 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
   if (loadError) return <Alert type="error" title="固件目录加载失败">{loadError}。请刷新页面重试。</Alert>;
   if (!app || !config) return <p className="text-muted-foreground">正在读取固件目录…</p>;
   const files = app.image[app.chipsets[0]?.toLowerCase()];
+  const guidePath = app.readme?.text;
+  const guideKey = guidePath?.match(/^\/firmware\/([\w-]+)\/([\w.-]+)\/README\.md$/);
+  const guide = (guideKey && guides[`../../../config/readmes/${guideKey[1]}-${guideKey[2]}.md`]) || guidePath;
   return <div className="space-y-5">
     <header className="space-y-2">
       <h1 className="text-2xl font-semibold tracking-tight">固件目录</h1>
-      <p className="text-sm text-muted-foreground">选择固件，连接设备安装，再完成终端配置。</p>
+      <p className="text-sm text-muted-foreground">选择固件，连接设备安装，再完成终端配置。 <a href="/pp-demo/" className="underline underline-offset-4">PP 交互演示</a></p>
     </header>
     <section className="rounded-xl border border-border bg-card p-6 space-y-5">
       <h2 className="flex items-center gap-3 text-sm font-semibold"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">1</span>选择固件</h2>
@@ -86,7 +94,7 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
       </dl>
       <div className="flex flex-wrap gap-3 border-t border-border pt-5">
         {app.download && <a className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-muted" href={app.download} download><Download size={16}/>下载刷写包</a>}
-        {app.readme?.text && <a className="inline-flex items-center gap-2 px-3 py-2 text-sm underline underline-offset-4" href={app.readme.text} target="_blank" rel="noreferrer">操作说明</a>}
+        {guide && <a className="inline-flex items-center gap-2 px-3 py-2 text-sm underline underline-offset-4" href={guide} target="_blank" rel="noreferrer">操作说明</a>}
         {app.manifest && <a className="inline-flex items-center gap-2 px-3 py-2 text-sm underline underline-offset-4" href={app.manifest} target="_blank" rel="noreferrer"><FileCheck2 size={16}/>镜像清单</a>}
       </div>
     </section>
@@ -108,7 +116,7 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
       <h2 className="flex items-center gap-3 text-sm font-semibold"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">3</span>配置与使用</h2>
       <div className="flex flex-wrap items-center justify-between gap-5">
         <div className="max-w-xl space-y-2">
-          <p className="text-sm">安装 PA-Terminal 0.2.0 后，按屏幕连接设备热点，填写初始 Wi-Fi 与 PA 业务地址。</p>
+          <p className="text-sm">安装新版 PA-Terminal 后，按屏幕连接设备热点并填写 Wi-Fi。PA 地址随固件提供。</p>
           <p className="text-xs leading-6 text-muted-foreground">连网后在 PA 后台输入设备的八位配对码。后续设置在 PA 后台维护，PP 菜单可以重载配置。PPDemo 系列直接在设备上使用。</p>
         </div>
         <a href="/pp-setup.html" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-muted"><SlidersHorizontal size={16}/>查看配网与配对<ArrowRight size={16}/></a>

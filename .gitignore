@@ -2,3 +2,7 @@ node_modules
 dist
 .sites-runtime/
 __pycache__/
+
+# Generated, public-safe PP lab summary. Full evidence stays in private/pp-lab.
+public/pp-demo/lab/status.json
+public/pp-demo/lab/.status-*

@@ -8,13 +8,15 @@ export const DEFAULT_CATALOG = createScenarioCatalog(scenarios);
 
 /** Presentation-only model. No network, microphone, real timers, or device access. */
 export class PassportModel {
-  constructor(preferences = {}, { catalog = DEFAULT_CATALOG, profile = PP_PROFILE } = {}) {
+  constructor(preferences = {}, { catalog = DEFAULT_CATALOG, profile = PP_PROFILE, paginate = value => textPages(value) } = {}) {
     if (!Object.keys(catalog).length) throw new TypeError('A scenario catalog is required');
     this.catalog = catalog;
     this.profile = profile;
+    this.textSize = 16; this.brightness = 65; this.showImages = true;
+    this.paginate = value => paginate(value, this.textSize);
     this.mode = preferences.mode === 'queue' ? 'queue' : 'steer';
-    this.volume = Number.isInteger(preferences.volume) ? Math.max(0, Math.min(100, preferences.volume)) : 65;
-    this.keepOnline = preferences.keepOnline !== false;
+    this.volume = Number.isInteger(preferences.volume) ? Math.max(0, Math.min(100, preferences.volume)) : 45;
+    this.keepOnline = preferences.keepOnline === true;
     this.autoSpeak = true; this.speechLimit = profile.simulation.automaticSpeechCharacters;
     this.voiceRate = 1; this.sleepSeconds = profile.idleSleepMs / 1000;
     this.scenario = Object.keys(catalog)[0];
@@ -37,6 +39,8 @@ export class PassportModel {
     this.responseText = '';
     this.responseVisible = '';
     this.submittedPrompt = '';
+    this.partialPrompt = '';
+    this.newReply = false;
     this.page = 0;
     this.menuIndex = 0;
     this.noticeIndex = 0;
@@ -51,10 +55,11 @@ export class PassportModel {
     this.events = [];
     this.feedback = '';
     this.clarification = null;
-    this.history = new DemoHistory(catalog);
+    this.history = new DemoHistory(catalog, { paginate: this.paginate });
     this.lastHistoryId = null;
   }
   get prompt() { return this.clarification?.prompt || this.catalog[this.scenario].prompt; }
+  get canSleep() { return this.input === 'idle' && !['processing', 'responding', 'clarifying'].includes(this.work) && !this.playing; }
   get backgroundPending() { return this.backgroundResults.length > 0; }
   get phase() {
     if (this.sleeping) return 'sleeping';
@@ -74,14 +79,13 @@ export class PassportModel {
   get pages() {
     const text = this.view === 'notice' ? this.activeNotice?.body || ''
       : this.work === 'responding' ? this.responseVisible : this.reply;
-    const rows = this.view === 'notice' ? 6 : 8;
-    const result = textPages(text, 13, rows);
-    if (this.replyImage && this.view !== 'notice' && this.work !== 'responding') result.push('');
+    const result = this.paginate(text);
+    if (this.showImages && this.replyImage && this.view !== 'notice' && this.work !== 'responding') result.push('');
     return result;
   }
-  get pageImage() { return this.replyImage && this.page === this.pages.length - 1 ? this.replyImage : null; }
+  get pageImage() { return this.showImages && this.replyImage && this.page === this.pages.length - 1 ? this.replyImage : null; }
   get reviewPages() {
-    return textPages(this.reviewDraft?.prompt || '');
+    return this.paginate(this.reviewDraft?.prompt || '');
   }
 
   get menus() {
@@ -96,6 +100,7 @@ export class PassportModel {
       { id: 'reload', label: '重载配置', value: '' },
       { id: 'retry', label: '重试连接', value: '' },
       { id: 'reconfigure', label: '重新配网', value: '' },
+      { id: 'repair', label: '重新配对', value: '' },
       { id: 'factory', label: '恢复出厂', value: '' },
       { id: 'back', label: '返回上级', value: '' },
     ];
@@ -121,7 +126,7 @@ export class PassportModel {
     if (!Object.hasOwn(this.catalog, id)) return false;
     this.inputVersion++; this.workVersion++;
     Object.assign(this, { scenario: id, input: 'idle', work: 'idle', view: 'home', playing: false,
-      sleeping: false, homeOnly: true, error: '', reply: '', replyImage: null, reviewDraft: null, responseText: '', responseVisible: '', submittedPrompt: '', page: 0, queue: [], clarification: null, feedback: '' });
+      sleeping: false, homeOnly: true, error: '', reply: '', replyImage: null, reviewDraft: null, responseText: '', responseVisible: '', submittedPrompt: '', partialPrompt: '', newReply: false, page: 0, queue: [], clarification: null, feedback: '' });
     this.resetSpeech();
     this.log(`切换体验场景：${this.catalog[id].prompt}`);
     return true;
@@ -133,6 +138,7 @@ export class PassportModel {
     this.stopPlayback();
     this.playing = false; this.error = ''; this.feedback = ''; this.elapsed = 0;
     this.input = 'recording';
+    this.partialPrompt = ''; this.newReply = false;
     this.log('开始本地收音（模拟），保留本次请求身份');
     return this.inputVersion;
   }
@@ -158,7 +164,7 @@ export class PassportModel {
     }
     if (this.failNext) {
       this.failNext = false;
-      this.error = '这次没听清';
+      this.error = '请求处理失败，请查看后台诊断。';
       this.log('识别失败 → 未提交执行 → 录音状态已清理，可重新说');
       return null;
     }
@@ -221,6 +227,7 @@ export class PassportModel {
     this.offerSpeech(this.reply, true);
     this.advanceSpeech(0);
     this.lastHistoryId = this.history.save(input.prompt, this.reply, true, this.replyImage).id;
+    this.newReply = this.homeOnly || this.view !== 'home';
     this.feedback = '';
     this.log(this.clarification ? '等待补充信息，不虚构已完成' : '文字生成完成，保留正文；已开始的播报继续，不从头重播');
     return true;
@@ -304,7 +311,7 @@ export class PassportModel {
   }
   toggleMode() {
     this.mode = this.mode === 'steer' ? 'queue' : 'steer';
-    this.feedback = this.mode === 'steer' ? '已切换：直接引导' : '已切换：排队';
+    this.feedback = this.mode === 'steer' ? '已切换引导' : '已切换排队';
     this.log(`${this.feedback}，偏好已在浏览器保存`);
   }
   backgroundComplete() {

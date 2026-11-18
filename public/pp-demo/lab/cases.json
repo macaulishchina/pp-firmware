@@ -1,0 +1,61 @@
+[
+  {
+    "id": "boot-first-frame",
+    "title": "开机首帧",
+    "panel": "conversation",
+    "steps": "将 PP 关机并重新开机，观察屏幕第一次点亮时显示的内容。",
+    "expected": "从熄屏直接进入正常界面，没有一闪而过的 Text 占位文字。"
+  },
+  {
+    "id": "screen-controls",
+    "title": "屏幕与按键手感",
+    "panel": "conversation",
+    "scene": "short",
+    "steps": "短按、双击和长按 OK，再在菜单或聊天页长按上键。",
+    "expected": "菜单、模式与录音各自响应。双击不闪收音，长按上回主页，正文和页脚可读。"
+  },
+  {
+    "id": "voice-playback",
+    "title": "真实收音与播报",
+    "panel": "conversation",
+    "scene": "long-input",
+    "steps": "按住 OK，说一句首尾清楚的短句，松手。用较长的回复试听，上下键调音量，按 OK 停播，再按住 OK 说下一句。",
+    "expected": "两次松手都能结束收音，转写保留首尾。播报连续、音量变化可听到；停播后文字继续，下一轮听不到上一轮的声音。"
+  },
+  {
+    "id": "unpaired-network-recovery",
+    "title": "离线时进入设置",
+    "panel": "setup",
+    "steps": "未配对且无法连接 PA 时，按 OK 进入设置。在设备维护中选择重新配网，先取消，再长按上返回。",
+    "expected": "取消回到设备维护，长按上回到连接主页。确认重新配网后才开启热点，热点页仅需 Wi-Fi。"
+  },
+  {
+    "id": "pairing-recovery",
+    "title": "配对被拒后保留 Wi-Fi",
+    "panel": "setup",
+    "steps": "在 PP 交互演示中撤销配对，按 OK 进入设置 → 设备维护 → 重新配对。先取消，再确认，然后在 PA 后台输入新码。",
+    "expected": "重试连接不会解除撤销；确认重新配对保留 Wi-Fi 和设置，绑定后进入新会话。进入设置时收到配对结果不会跳走。"
+  },
+  {
+    "id": "pair-reconnect",
+    "title": "配对、重连与离线历史",
+    "panel": "setup",
+    "steps": "配对后打开一条回复，断开 Wi-Fi，查看最近记录，再恢复网络。",
+    "expected": "沿用原会话，最近缓存可读，旧任务和声音不会重放。"
+  },
+  {
+    "id": "task-image",
+    "title": "任务报告与缩略图",
+    "panel": "conversation",
+    "scene": "task",
+    "steps": "完成一个只读任务，打开报告并翻页退出，再用图片场景查看缩略图。",
+    "expected": "报告归属当前 PP，上下键可用，返回位置正确，图片颜色和裁切符合预期。"
+  },
+  {
+    "id": "sleep-stability",
+    "title": "休眠、唤醒与长时间使用",
+    "panel": "debug",
+    "steps": "开启空闲后休眠，在交互期间观察屏幕。空闲后从设置选择休眠，待屏幕熄灭，再按住 OK 唤醒，亮屏后松手。重复三次，每次重新收音和播放。",
+    "expected": "交互期间屏幕正常。每次休眠均可唤醒，唤醒键只负责开机，松手后屏幕、三个按键和声音恢复。连续使用期间记录重启、卡键或重复播报。"
+  }
+]

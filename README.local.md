@@ -44,14 +44,15 @@ docker compose -p pp-firmware -f deploy/compose.yaml up -d
 
 固件目录按“选择固件 → USB 安装 → 配网与配对”组织。连接／断开集中在安装区；
 配网说明是独立静态页，不读写串口，安装中也可查看。
-PA-Terminal 0.2.0 由设备热点完成初始 Wi-Fi 与 PA 地址设置，联网后显示八位配对码，
-在 PA 后台绑定；后续配置由 PA 后台云控。没有 USB 配网或配对文件导入。
+新版 PA-Terminal 由设备热点完成初始 Wi-Fi 设置。PA 地址和公开 CA 在构建时写入，
+取自 `config/pa-terminal-build.toml`。需要换实例时修改发布配置后构建一个新的固件版本。
+联网后在 PA 后台绑定，后续设备配置由 PA 后台管理。
 PPDemo 系列直接按设备菜单使用。网站的浏览器刷写需要可信 HTTPS，普通 PP 业务 HTTP/WS 不需要 CA。
 
 ## PP 交互演示
 
 独立页面：`/pp-demo/`，源码位于 `public/pp-demo/`。固定维护为可复用的 PC 演示底座，
-不做移动端适配；开发约定见 [PP 演示底座](docs/pp-demo-framework.md)。用于确认屏幕布局、按键、
+不做移动端适配；开发约定见 [PP 交互演示开发文档](docs/pp-demo-framework.md)。用于确认屏幕布局、按键、
 引导／排队、短播报／长文本、澄清、任务消息和异常恢复体验，全部为浏览器模拟。
 不申请麦克风或串口、不连接 PA、不发起模型或语音调用；音量与播报仅模拟呈现。
 只在浏览器保存演示用的输入模式、音量和保持在线偏好，不保存对话或凭据。
@@ -67,6 +68,8 @@ node --test tests/passport-demo.test.mjs
 演示源码直接挂载到网站 `/pp-demo/`，该路径不缓存。修改 `public/pp-demo/` 后刷新即可，
 不用构建、复制到 dist、运行验收或重启服务。标准前端构建仍包含静态演示，便于普通打包。
 日常需求讨论优先直接预览，只有明确要求时才进行测试、提交或发布整理。
+
+PP 开发、测试与反馈使用 [PP 开发与验收闭环](docs/pp-iteration.md)。
 
 ## Windows 信任本地 CA
 

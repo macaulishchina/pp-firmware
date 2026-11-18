@@ -1,0 +1,3 @@
+# Release-time PA destination for this firmware site.
+server_url = "https://47.109.34.254:8047"
+ca_file = "../../private/tls/ca.crt"
