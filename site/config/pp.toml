@@ -1,6 +1,38 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.1-preview.8", "PA-Terminal · 0.2.1-preview.7", "PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.1-preview.8"]
+description = "修复识别失败后反复提示语音忙及输入状态变化，保留原设备配置。"
+version = "0.2.1-preview.8"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.8/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.8/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.8/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.8/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.8/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.8/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2978304]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "cc3e5442f4f030818e1d3b83b07a80c7cef2aa4e056266cf9c2c94265cd9a600"]
+
+["PA-Terminal · 0.2.1-preview.7"]
+description = "修复按键误触、返回焦点、任务列表加载与配网退出后的连接恢复，保留原设备配置。"
+version = "0.2.1-preview.7"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.7/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.7/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.7/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.7/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.7/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.7/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2977248]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "852f44223678196749c0a5553d57d2ebea163f84930efe8691820fff9c701d07"]
 
 ["PA-Terminal · 0.2.1-preview.6"]
 description = "改进分块播放、停播后录音、断线回执核对和深睡唤醒，保留原设备配置。"
