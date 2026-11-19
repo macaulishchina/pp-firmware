@@ -26,9 +26,9 @@ export const scenarios = [
     },
   },
   {
-    id: 'image', title: '一张图片回复', description: '压缩缩略图，正文与图片翻页', symbol: '▧',
+    id: 'image', title: '一张图片回复', description: '按屏幕尺寸看图，在正文与图片间翻页', symbol: '▧',
     prompt: '显示一张测试图片。',
-    reply: '这是一张合成色卡。按下键查看图片，再按上键返回正文。真机只读取适合屏幕的缩略图，不下载原图。',
+    reply: '这是一张合成色卡。按下键查看图片，再按上键返回正文。真机联网时分块绘制适合屏幕的高清图，离线时可以打开已缓存的小预览。',
     image: { src: './color-check.svg', alt: '160 × 96 合成色卡' },
   },
   {
