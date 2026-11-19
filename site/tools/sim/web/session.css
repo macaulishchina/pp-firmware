@@ -1,16 +1,18 @@
 .pp-session-bar {
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
-  gap: .55rem;
+  gap: .45rem .65rem;
   padding: .65rem 1rem;
   background: var(--card);
   color: var(--foreground);
   border-bottom: 1px solid var(--border);
   font-size: .875rem;
 }
-.pp-session-bar form { display: flex; gap: .4rem; }
-.pp-session-bar input { width: 10rem; }
+.pp-session-bar form { display: flex; min-width: 0; gap: .4rem; }
+.pp-session-bar input { width: clamp(8rem, 22vw, 16rem); min-width: 0; }
+.pp-session-bar select { max-width: 100%; }
 .pp-session-bar input,
 .pp-session-bar select,
 .pp-session-bar button {
@@ -19,9 +21,22 @@
   padding: .25rem .6rem;
   background: var(--background);
 }
-.pp-session-bar button { cursor: pointer; }
+.pp-session-bar button { cursor: pointer; white-space: nowrap; }
 .pp-session-bar button:disabled { opacity: .55; cursor: default; }
 .pp-session-bar a { text-decoration: underline; }
-.pp-session-bar output { color: var(--muted-foreground); }
+.pp-session-bar output {
+  flex-basis: 100%;
+  min-width: 0;
+  color: var(--muted-foreground);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.pp-session-bar output:empty { display: none; }
+
+/* When the app header is unavailable, keep the static badge above the session controls. */
+body:has(> .pp-session-bar) > .emulator-badge {
+  position: static;
+  margin: .75rem 1rem 0;
+}
 .pp-remote [data-loader],
 .pp-remote [data-action="show-snapshots"] { display: none !important; }

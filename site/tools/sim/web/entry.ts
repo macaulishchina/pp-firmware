@@ -62,7 +62,12 @@ const bar = element("section");
 bar.className = "pp-session-bar";
 bar.setAttribute("aria-label", words.heading);
 bar.append(element("strong", share ? `${words.heading} #${share.session}` : words.heading));
-document.getElementById("app")?.before(bar);
+const mount = document.getElementById("app");
+mount?.before(bar);
+
+function placeSessionBar() {
+  mount?.querySelector(".app-header")?.after(bar);
+}
 
 const input = element("input");
 input.type = "text";
@@ -89,7 +94,7 @@ joinForm.addEventListener("submit", (event) => {
 
 if (id === null) {
   // Keep the upstream browser-hosted emulator entry intact.
-  void import(new URL("./main.js", import.meta.url).href);
+  void import(new URL("./main.js", import.meta.url).href).then(placeSessionBar);
   const firmware = element("select");
   firmware.setAttribute("aria-label", words.image);
   const create = button(words.create);
@@ -184,6 +189,7 @@ if (id === null) {
       status.textContent = note;
       end.disabled = !session.state() || Boolean(session.state()?.busy);
     });
+    placeSessionBar();
     copy.onclick = async () => {
       try {
         await navigator.clipboard.writeText(url(share).href);
