@@ -9,10 +9,6 @@ __pycache__/
 /.vscode/
 /.idea/
 
-# Generated, public-safe PP lab summary. Full evidence stays in private/pp-lab.
-/site/public/pp-demo/lab/status.json
-/site/public/pp-demo/lab/.status-*
-
 # Local deployment, test evidence and firmware build output.
 /private/
 /candidates/

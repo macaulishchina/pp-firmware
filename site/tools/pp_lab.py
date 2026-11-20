@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the PP feedback loop from the Dell development workspace."""
+"""Build and validate PP firmware from the Dell development workspace."""
 import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,20 +21,16 @@ from zipfile import ZipFile
 import pp_sim
 
 SITE = Path(__file__).resolve().parents[1]
-DEMO = SITE / "public/pp-demo"
 PLUGIN = Path("src/assistant_runtime/plugins/ai_passport")
 FIRMWARE = PLUGIN / "firmware"
 TERMINAL = FIRMWARE / "apps/pa_terminal"
-CASES = {case["id"]: case for case in json.loads((DEMO / "lab/cases.json").read_text())}
 STAGES = {
-    "sync": "固件与 PP 交互演示对照",
     "unit": "单元与镜像打包检查",
     "integration": "PA 协议和合成语音集成",
-    "demo": "PP 交互演示按键与页面",
     "candidate": "ESP-IDF 候选构建",
     "device": "Windows 远程串口",
 }
-QUICK = ("sync", "unit", "integration", "demo")
+QUICK = ("unit", "integration")
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?")
 
 
@@ -88,7 +84,6 @@ class Lab:
         self.python = self.pa / ".venv/bin/python"
         self.app = self.pa / TERMINAL
         self.state = args.state_dir.resolve()
-        self.report = args.report.resolve()
         profile = args.release_profile.resolve()
         release = tomllib.loads(profile.read_text())
         self.release_url = release["server_url"]
@@ -108,32 +103,20 @@ class Lab:
                 if field in settings and getattr(args, field) is None:
                     setattr(args, field, settings[field])
         self.record_file = self.state / "record.json"
-        self.record = read_json(self.record_file, {"stages": {}, "feedback": {}, "issues": {}})
-        for stage in self.record["stages"].values():
-            if stage["status"] == "running":
+        self.record = read_json(self.record_file, {"stages": {}})
+        for name in STAGES:
+            stage = self.record["stages"].get(name, {})
+            if stage.get("status") == "running":
                 stage.update(status="interrupted", hint="上次运行中断，可单独复跑。")
-        self.parity = read_json(DEMO / "lab/parity.json", {})
         self.inputs = self.signatures()
 
     def signatures(self):
-        site_files = repo_files(SITE)
         pa_files = repo_files(self.pa)
         # Both the release archive and its link check depend on bundled manuals.
         firmware = digest(self.pa, [p for p in pa_files if
             (is_under(p, FIRMWARE) and p.suffix != ".md")
             or is_under(p, PLUGIN / "docs") or is_under(p, FIRMWARE / "docs")
             or p in (TERMINAL / "README.md", FIRMWARE / "README.md")])
-        # Key events, network messages, audio, sleep and drawing all affect the
-        # interaction. Track the terminal component and its shared board code as
-        # directories so extracting a module cannot silently drop it from parity.
-        board = FIRMWARE / "components"
-        ui_paths = [p for p in pa_files if is_under(p, TERMINAL / "main") or
-                    (is_under(p, board) and p.suffix in {".c", ".h"})]
-        assets = [p for p in pa_files if is_under(p, TERMINAL / "main/fonts") or is_under(p, TERMINAL / "main/assets")]
-        ui_hash = digest(self.pa, [*ui_paths, TERMINAL / "sdkconfig.defaults", TERMINAL / "version.txt"])
-        asset_hash = digest(self.pa, assets)
-        browser = digest(SITE, [p for p in site_files if is_under(p, Path("public/pp-demo"))
-                               and p.name != "parity.json"] + [Path("tests/verify_passport_demo.py")])
         integration_host = digest(self.pa, [p for p in pa_files
                                              if str(p).startswith("src/assistant_runtime/") and not is_under(p, FIRMWARE)
                                              or str(p).startswith("tests/test_passport_")
@@ -142,17 +125,15 @@ class Lab:
                                                       Path("scripts/check_passport_hardware.py"))])
         # The integration suite checks the pinned BSP files as well as the Python runtime.
         integration = evidence_signature(firmware, integration_host)
-        unit = evidence_signature(firmware, browser, digest(SITE, [
-            Path("tests/passport-demo.test.mjs"), Path("tests/test_pp_lab.py"), Path("tools/pp_lab.py"),
+        unit = evidence_signature(firmware, digest(SITE, [
+            Path("tests/test_pp_lab.py"), Path("tools/pp_lab.py"),
         ]))
         release_paths = [self.release_profile]
         if self.release_ca:
             release_paths.append(self.release_ca)
-        return {"sync": evidence_signature(ui_hash, browser), "unit": unit, "integration": integration,
-                "demo": browser, "candidate": evidence_signature(firmware, digest(SITE, release_paths)),
-                "device": evidence_signature(self.version, firmware, digest(SITE, [Path("tools/pp_device_status.ps1")])),
-                "ui": ui_hash, "assets": asset_hash,
-                "revision": evidence_signature(firmware, browser, integration_host)[:16]}
+        return {"unit": unit, "integration": integration,
+                "candidate": evidence_signature(firmware, digest(SITE, release_paths)),
+                "device": evidence_signature(self.version, firmware, digest(SITE, [Path("tools/pp_device_status.ps1")]))}
 
     def log(self, run, name, argv, cwd=SITE, timeout=90, env=None):
         with (run / f"{name}.log").open("ab") as output:
@@ -222,10 +203,6 @@ class Lab:
         return "pass", hint + "。", detail
 
     def check(self, name, run):
-        if name == "sync":
-            if self.parity.get("firmware_ui") != self.inputs["ui"]:
-                return "fail", "固件 UI 基线有变化。请对照显示、交互和用例后更新 PP 交互演示基线。", None
-            return "pass", "固件 UI 来源与已审查的 PP 交互演示基线一致。", None
         if name == "device":
             if not self.args.ssh_host:
                 return "waiting", "等待配置 Windows SSH 入口。", None
@@ -239,7 +216,6 @@ class Lab:
                      'source "$1" && cmake -S "$2" -B "$3" "-DPP_CJSON_SOURCE=$4"'
                      ' && cmake --build "$3" --parallel 3 && ctest --test-dir "$3" --output-on-failure',
                      "pp-lab", self.args.sdk_root / "activate.sh", self.pa / FIRMWARE / "tests", host, sdk])
-            self.log(run, name, ["node", "--test", "tests/passport-demo.test.mjs"])
             self.log(run, name, [self.python, "-m", "unittest", "discover", "-s",
                                  self.pa / FIRMWARE / "tests", "-p", "test_*.py"])
             self.log(run, name, [self.python, "-m", "unittest", "discover", "-s",
@@ -248,8 +224,6 @@ class Lab:
             self.log(run, name, [self.python, "-m", "unittest", "test_ai_passport", "test_passport_protocol",
                                  "test_passport_settings", "test_passport_hardware", "test_terminal_delivery"],
                      cwd=self.pa, timeout=180, env={**os.environ, "PYTHONPATH": "src:tests"})
-        elif name == "demo":
-            self.log(run, name, [self.python, "tests/verify_passport_demo.py"], timeout=100)
         elif name == "candidate":
             build_flags = [f"-DPP_PA_URL={self.release_url}",
                            f"-DPP_PA_CA_FILE={self.release_ca or ''}"]
@@ -271,34 +245,25 @@ class Lab:
                 "appSha256": app_hash,
             }
         return "pass", {
-            "unit": "固件 C、PP 交互演示状态与镜像打包检查通过。",
+            "unit": "固件 C、镜像打包和验收工具检查通过。",
             "integration": "合成识别和播报走通真实 PA/Pi，覆盖配对、会话、任务及图片。",
-            "demo": "浏览器场景和验收反馈入口检查通过。",
         }[name], None
 
-    def publish_status(self):
+    def status(self):
         stages = {}
         for name, title in STAGES.items():
             raw = self.record["stages"].get(name, {})
             status = raw.get("status", "pending")
-            if raw and raw["input"] != self.inputs[name]:
+            if raw and raw.get("input") != self.inputs[name]:
                 status = "stale"
             stages[name] = {"title": title, "status": status, "at": raw.get("at"),
                             "duration": raw.get("duration"), "run": raw.get("run"),
                             "hint": "相关源码已变化，请重跑此项。" if status == "stale" else raw.get("hint", ""),
                             "detail": raw.get("detail") if status != "stale" else None}
-        manual = {}
-        for case, result in self.record["feedback"].items():
-            if result["result"] == "pass" and result["revision"] == self.inputs["revision"]:
-                manual[case] = "pass"
-        issues = [
-            {key: issue[key] for key in ("id", "case", "status", "summary")}
-            for issue in reversed(list(self.record["issues"].values()))
-        ][:24]
+        return {"firmware": self.version, "stages": stages}
+
+    def save_record(self):
         atomic_json(self.record_file, self.record, 0o600)
-        atomic_json(self.report, {"schema": 1, "updated": utc(), "firmware": self.version,
-                                 "revision": self.inputs["revision"], "stages": stages,
-                                 "manual": manual, "issues": issues}, 0o644)
 
     def run(self, names):
         run = Path(tempfile.mkdtemp(prefix=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-"),
@@ -306,7 +271,7 @@ class Lab:
         for name in names:
             self.record["stages"][name] = {"status": "running", "input": self.inputs[name],
                                            "run": run.name, "at": utc()}
-        self.publish_status()
+        self.save_record()
 
         def work(name):
             start = time.monotonic()
@@ -326,51 +291,11 @@ class Lab:
                 result = future.result()
                 self.record["stages"][name] = result
                 print(f"{name}: {result['status']} ({result['duration']}s) {result['hint']}", flush=True)
-                self.publish_status()
+                self.save_record()
         self.inputs = self.signatures()
-        self.publish_status()
         print(f"Evidence: {run}")
         return int(any(self.record["stages"][name]["status"] == "fail"
                        or self.record["stages"][name]["input"] != self.inputs[name] for name in names))
-
-    def sync(self, reason):
-        if self.parity.get("assets") != self.inputs["assets"]:
-            subprocess.run([self.python, SITE / "tools/export_demo_display.py", self.app], cwd=SITE, check=True)
-        self.parity = {"firmware_ui": self.inputs["ui"], "assets": self.inputs["assets"],
-                       "version": self.version}
-        atomic_json(DEMO / "lab/parity.json", self.parity, 0o644)
-        (self.state / "sync.log").open("a", encoding="utf-8").write(f"{utc()} {self.version} {reason}\n")
-        self.inputs = self.signatures()
-        return self.run(["sync"])
-
-    def feedback(self, path):
-        if path.stat().st_size > 12_000:
-            raise ValueError("Feedback exceeds 12 KiB")
-        data = json.loads(path.read_text())
-        if not isinstance(data, dict):
-            raise ValueError("Feedback must be a JSON object")
-        case, result = data.get("case"), data.get("result")
-        revision, note = data.get("revision"), data.get("note", "")
-        if (data.get("schema") != 1 or case not in CASES or result not in {"pass", "issue", "suggestion"}
-                or not isinstance(note, str) or len(note) > 2000
-                or not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{16}", revision)):
-            raise ValueError("Invalid feedback or missing PP 交互演示 revision")
-        if result == "pass" and revision != self.inputs["revision"]:
-            raise ValueError("A pass must refer to the current revision. Refresh PP 交互演示 and retry.")
-        record = {"case": case, "result": result, "note": note, "revision": revision}
-        ident = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()[:12]
-        atomic_json(self.state / "feedback" / f"{ident}.json", record, 0o600)
-        if result == "pass":
-            self.record["feedback"][case] = {"result": result, "revision": revision}
-            for issue in self.record["issues"].values():
-                if issue["case"] == case and issue["status"] == "retest":
-                    issue["status"] = "resolved"
-        else:
-            self.record["feedback"].pop(case, None)
-            self.record["issues"].setdefault(ident, {"id": ident, "case": case, "status": "open",
-                "summary": "收到问题反馈，等待开发者复现。" if result == "issue" else "收到改进建议，等待评估。"})
-        self.publish_status()
-        print(f"Feedback {ident} imported for {case}.")
 
 
 def main():
@@ -378,7 +303,6 @@ def main():
     parser.add_argument("--pa-root", type=Path, default=SITE.parent.parent / "PersonalAgent")
     parser.add_argument("--sdk-root", type=Path, default=SITE.parent / "toolchain")
     parser.add_argument("--state-dir", type=Path, default=SITE.parent / "private/pp-lab")
-    parser.add_argument("--report", type=Path, default=DEMO / "lab/status.json")
     parser.add_argument("--release-profile", type=Path, default=SITE / "config/pa-terminal-build.toml")
     parser.add_argument("--ssh-host", default=os.getenv("PP_LAB_SSH_HOST"))
     parser.add_argument("--ssh-port", type=int, default=os.getenv("PP_LAB_SSH_PORT"))
@@ -387,15 +311,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="Run quick checks by default or choose stages")
     run.add_argument("stages", nargs="*", metavar="STAGE")
-    sync = commands.add_parser("sync", help="Record that firmware UI changes were reviewed against PP 交互演示")
-    sync.add_argument("--reason", required=True)
-    feedback = commands.add_parser("feedback", help="Import feedback exported from PP 交互演示")
-    feedback.add_argument("file", type=Path)
-    triage = commands.add_parser("triage", help="Update an issue with a user-facing summary")
-    triage.add_argument("id")
-    triage.add_argument("status", choices=["open", "retest", "resolved"])
-    triage.add_argument("--summary", required=True)
-    commands.add_parser("status", help="Refresh PP 交互演示 status and stale indicators")
+    commands.add_parser("status", help="Show current acceptance stages and stale evidence")
     pp_sim.configure(commands.add_parser("sim", help="Exercise real PP firmware in PassportSim"))
     args = parser.parse_args()
     os.umask(0o077)
@@ -426,19 +342,8 @@ def main():
             if any(name not in STAGES for name in names):
                 parser.error("Stage must be one of " + ", ".join(STAGES))
             return lab.run(names)
-        if args.command == "sync":
-            return lab.sync(args.reason)
-        if args.command == "feedback":
-            lab.feedback(args.file)
-        elif args.command == "triage":
-            issue = lab.record["issues"].get(args.id)
-            summary = args.summary.strip()
-            if not issue or not summary or len(summary) > 240:
-                parser.error("Use an existing issue ID and a 1–240 character public-safe summary.")
-            issue.update(status=args.status, summary=summary)
-            lab.publish_status()
-        else:
-            lab.publish_status()
+        lab.save_record()
+        print(json.dumps(lab.status(), ensure_ascii=False, indent=2))
     return 0
 
 

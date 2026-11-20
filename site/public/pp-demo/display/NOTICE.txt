@@ -1,3 +1,0 @@
-Bitmaps exported from PA-Terminal 0.2.1-preview.25, including LVGL 9.5.0's Montserrat 14 asset.
-The LVGL symbols are Font Awesome 5 Free icons (CC BY 4.0, Fonticons, Inc.).
-https://fontawesome.com/license/free

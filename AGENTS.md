@@ -9,9 +9,5 @@
 - Browser installation talks to the operator's computer; a server-side USB connection is not required. Never flash real hardware as an automated test.
 - Build with npm ci/npm run build from site/. Test affected contracts and browser behavior; synthetic success is not hardware acceptance.
 - Only this website's Compose project may be restarted here; PA and other services are independent.
-- PP 交互演示 uses `site/public/pp-demo/core/` and its state model. Add declarative scenes in `scenarios.js`; do not copy a new device shell for each feature. See `site/docs/pp-demo-framework.md`.
-- PP 交互演示 targets PC mouse/keyboard only. Keep it entirely simulated: no microphone, serial, PA requests or paid inference.
-- PP 交互演示 previews are intentionally fast: edit `site/public/pp-demo/` directly and refresh. Compose mounts this source directory read-only and nginx disables caching. Do not build, copy to dist, run acceptance suites or redeploy for routine UI changes unless the user explicitly asks. Existing tests are available for a later stabilization pass.
-- PP business ingress belongs on PA port 8047. Port 9443 is for the firmware website, not future business forwarding. Prefer HTTP/WS unless HTTPS/WSS is specifically necessary (browser USB remains a secure-context requirement); do not change live ingress as part of a PP 交互演示 UI task.
-
-- For PP iteration work, use the acceptance workflow in `site/docs/pp-iteration.md`. Run affected stages with `site/tools/pp_lab.py`, keep PP 交互演示 aligned with device UI changes, and leave only checks that require a person under field acceptance. Keep evidence and imported feedback private.
+- PP business ingress belongs on PA port 8047. Port 9443 serves the firmware center and PassportSim. Prefer HTTP/WS unless HTTPS/WSS is necessary. Browser USB requires a secure context.
+- For PP iteration work, use `site/docs/pp-iteration.md`. Run affected stages with `site/tools/pp_lab.py` and test device UI and button interactions in PassportSim using actual firmware. Keep cases in `site/tools/sim/scenes.json` and evidence private. Verify physical buttons, display, sound and power behavior on hardware.

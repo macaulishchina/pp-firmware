@@ -71,7 +71,7 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
   return <div className="space-y-5">
     <header className="space-y-2">
       <h1 className="text-2xl font-semibold tracking-tight">固件目录</h1>
-      <p className="text-sm text-muted-foreground">选择固件，连接设备安装，再完成终端配置。 <a href="/pp-demo/" className="underline underline-offset-4">PP 交互演示</a></p>
+      <p className="text-sm text-muted-foreground">选择固件，连接设备安装，再完成终端配置。 <a href="/pp-sim/" className="underline underline-offset-4">PP Sim</a></p>
     </header>
     <section className="rounded-xl border border-border bg-card p-6 space-y-5">
       <h2 className="flex items-center gap-3 text-sm font-semibold"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">1</span>选择固件</h2>

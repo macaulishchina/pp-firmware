@@ -81,27 +81,7 @@ Nginx 通过用户服务创建的 Unix socket 代理 API。公网与局域网仍
 联网后在 PA 后台绑定，后续设备配置由 PA 后台管理。
 PPDemo 系列直接按设备菜单使用。网站的浏览器刷写需要可信 HTTPS，普通 PP 业务 HTTP/WS 不需要 CA。
 
-## PP 交互演示
-
-独立页面：`/pp-demo/`，源码位于 `public/pp-demo/`。固定维护为可复用的 PC 演示底座，
-不做移动端适配；开发约定见 [PP 交互演示开发文档](docs/pp-demo-framework.md)。用于确认屏幕布局、按键、
-引导／排队、短播报／长文本、澄清、任务消息和异常恢复体验，全部为浏览器模拟。
-不申请麦克风或串口、不连接 PA、不发起模型或语音调用；音量与播报仅模拟呈现。
-只在浏览器保存演示用的输入模式、音量和保持在线偏好，不保存对话或凭据。
-硬件外观图来自 FoloToy AI Passport，随页保留 MIT 许可。
-
-验证：
-
-```sh
-node --test tests/passport-demo.test.mjs
-/home/macaulish/workspace/PersonalAgent/.venv/bin/python tests/verify_passport_demo.py
-```
-
-演示源码直接挂载到网站 `/pp-demo/`，该路径不缓存。修改 `public/pp-demo/` 后刷新即可，
-不用构建、复制到 dist、运行验收或重启服务。标准前端构建仍包含静态演示，便于普通打包。
-日常需求讨论优先直接预览，只有明确要求时才进行测试、提交或发布整理。
-
-PP 开发、测试与反馈使用 [PP 开发与验收闭环](docs/pp-iteration.md)。
+开发和验收使用 PassportSim 运行实际固件，命令和真机验收说明见 [PP 开发与验收闭环](docs/pp-iteration.md)。
 
 ## Windows 信任本地 CA
 
