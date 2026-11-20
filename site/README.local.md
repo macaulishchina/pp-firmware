@@ -1,7 +1,7 @@
 # PP 固件中心（Dell 本地部署）
 
 外网入口：**https://47.109.34.254:9443/**（FRP TCP 转发）。局域网入口：**https://110.0.0.82:9443/**。这是本地自用的静态固件展示、选择、下载和 USB 安装网站。
-已上架 PA-Terminal 0.2.1-preview.1 预览版、0.2.0 日常使用版及历史版本，
+PA-Terminal 公开目录当前提供 0.2.1-preview.33，
 另保留 PPDemo 0.2.0 英文版和 PPDemo-Zh 0.2.0 中文版。
 0.2 系列使用协议 2，支持中文语音、独立会话、任务消息和有界 Flash 缓存；
 预览版用于安装体验和问题反馈，不代表已完成全部真机及长期稳定性验收。
@@ -18,7 +18,7 @@
 - `config/pp.toml`：唯一展示清单；本地发布命令生成，Nginx 直接读取，更新无需重编前端。
 - `config/readmes/`：发布用的公开使用说明。
 - `../candidates/`：私有构建候选及调试证据，不对外服务。
-- `../releases/<app>/<version>/`：随清单提交的公开镜像、说明和刷写包，各版本的发布内容固定。
+- `../releases/<app>/<version>/`：发布机本地提供的镜像、说明和刷写包，各版本的发布内容固定。Git 保存展示清单和发布说明；新部署主机需从经校验的候选包通过发布工具恢复对应版本。
 - `deploy/`：Docker Compose、Nginx；`dist/` 是生成的前端。
 - `../private/`：证书及验证记录，不进入 Git 或公开目录。CA 私钥不挂入网站容器。
 
@@ -106,6 +106,19 @@ Import-Certificate -FilePath "$env:USERPROFILE\Downloads\pp-firmware-ca.crt" -Ce
 不能用本站原有 CA 私钥重签，`--renew` 会明确拒绝不匹配的签名私钥。续期由 GoldenNest 管理，
 本站复制更新。若将来恢复独立 CA，需由操作者明确配置相匹配的 CA 与签名密钥。
 
+## 保留设备数据升级
+
+固件中心在 USB 写入前读取设备分区表并核对校验和。每个已有数据分区的名称、类型、子类型、地址、大小和标志都必须保留。允许缩小应用分区以增加独立缓存。分区重叠、数据分区移动、分区表损坏或无法读取时，安装会在擦写前停止。只有验证整片闪存为空时，才按空设备初始化。镜像完全相同时跳过写入。
+
+PA-Terminal 候选包与正式包也可以在连接 USB 的电脑上安装。使用 Node.js 20.19+ 和安装了 `esptool==4.13.0` 的 Python，从本仓库的 `site/` 运行。预检会让设备进入下载模式再重启。
+
+```sh
+python tools/install_firmware.py firmware.zip --port COM5 --check-only
+python tools/install_firmware.py firmware.zip --port COM5
+```
+
+Linux 将 `COM5` 换成设备串口。网页、上述 CLI 和 PA-Terminal 发布检查共用分区规则。对确需移动已有数据的版本，先提供专用迁移和校验，再更新升级策略。已有数据分区内部的记录格式变更由对应固件模块负责迁移。直接调用底层烧录工具会绕过安装保护。
+
 ## 添加／发布固件
 
 候选清单格式沿用固件打包工具的 manifest.json，必须包含真实镜像大小和 SHA256。
@@ -158,9 +171,13 @@ python3 tools/publish.py \
   Chromium，忽略测试环境的证书错误；Windows 仍需按上文导入 CA。
 
 ```sh
-node --test tests/firmware.test.mjs
+# 以下 TypeScript 主机测试使用 Node 22.18+
+node --test tests/{firmware,upgrade}.test.mjs
+python3 tests/test_install_firmware.py
 python3 tests/test_publish.py
 npm run build
 # 浏览器验收使用已经安装 Playwright 的现有开发环境，不给网站增加运行时 Python 依赖：
 /home/macaulish/workspace/PersonalAgent/.venv/bin/python tools/verify_site.py
 ```
+
+preview.33 的 pp-data-v2 安装器识别原 3.5 MiB 临时区与 512 KiB 历史区组合。先复制并校验完整历史区，再写分区表；设备首次挂载时扩容。中途断开后再次安装会重新比对副本。尚无临时区的旧设备请先通过本地 USB 安装器安装私有保留的 preview.32 过渡包，再从公开目录升级。新布局禁止直接回刷会覆盖历史的旧布局。

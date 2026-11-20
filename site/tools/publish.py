@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import shutil
 import struct
+import subprocess
 import tempfile
 import tomllib
 import zipfile
@@ -71,7 +72,26 @@ def validate(candidate):
         raise ValueError("Expected bootloader, partition table and factory application")
     if len(image_data[0x10000]) > application_limit(image_data[0x8000]):
         raise ValueError("Application would overwrite a data/cache partition")
+    if manifest.get("upgrade_policy", "pp-data-v1") not in {"pp-data-v1", "pp-data-v2"}:
+        raise ValueError("Unsupported PP upgrade policy")
     return manifest
+
+
+
+def check_release_layout(candidate, release_dir):
+    protected_tables = []
+    for path in sorted(release_dir.glob("*/manifest.json")):
+        if path.parent.name.startswith("."):
+            continue
+        previous = json.loads(path.read_text())
+        if previous.get("upgrade_policy") not in {"pp-data-v1", "pp-data-v2"}:
+            continue
+        table = next(row for row in previous["flash_files"] if int(row["offset"], 0) == 0x8000)
+        protected_tables.append(path.parent / table["file"])
+    planner = Path(__file__).with_name("upgrade_plan.mjs")
+    result = subprocess.run(["node", planner, candidate, *protected_tables], capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "Incompatible PP storage layout")
 
 
 def atomic_text(path, text):
@@ -124,6 +144,8 @@ def update_catalog(root=None, catalog=None):
         if m.get("release_channel"):
             text += f'channel = {quote(m["release_channel"])}\n'
         text += f'readme.text = {quote(base + "README.md")}\n'
+        if "upgrade_policy" in m:
+            text += f'image.esp32-c3.upgrade_policy = {quote(m["upgrade_policy"])}\n'
         for key, values in {
             "parts": [base + f["file"] for f in files],
             "addresses": [f["offset"] for f in files],
@@ -150,10 +172,15 @@ def publish(candidate, app_id, description, readme, channel=None, *, root=None, 
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         existing = json.loads((target / "manifest.json").read_text())
+        if manifest["application"] == "PA-Terminal" and "upgrade_policy" in existing:
+            manifest.setdefault("upgrade_policy", "pp-data-v1")
         if existing != manifest:
             raise ValueError("Published versions are immutable; choose a new version")
         validate(target)
     else:
+        if manifest["application"] == "PA-Terminal":
+            check_release_layout(candidate, target.parent)
+            manifest.setdefault("upgrade_policy", "pp-data-v1")
         stage = Path(tempfile.mkdtemp(prefix=".staging-", dir=target.parent))
         try:
             for item in manifest["flash_files"]:

@@ -1,4 +1,11 @@
 {
+  "offline-status-meter": {
+    "title": "离线状态栏与跨页布局",
+    "steps": [
+      {"name": "离线主屏显示两条横杠及右侧箭头", "expect": ["设备连接", "OK 菜单"], "screenRegion": {"rect": [159, 9, 191, 22], "rgbSha256": "0e24833b8d2fdb3fcfdb76d55cc7fb603273b6d4a15c00e039840a330f76338a"}},
+      {"name": "进入操作菜单后状态栏仍在原位", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["操作菜单"], "screenRegion": {"rect": [159, 9, 191, 22], "rgbSha256": "0e24833b8d2fdb3fcfdb76d55cc7fb603273b6d4a15c00e039840a330f76338a"}}
+    ]
+  },
   "offline-settings": {
     "title": "离线操作菜单、默认任务焦点和本机亮度",
     "steps": [

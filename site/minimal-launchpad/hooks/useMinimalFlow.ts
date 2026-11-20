@@ -119,7 +119,7 @@ export function useMinimalFlow(config: MinimalConfigState) {
       return;
     }
 
-    const flash = await esp.downloadAndFlashParts(resolved.parts, { eraseAll: false });
+    const flash = await esp.downloadAndFlashParts(resolved.parts, { eraseAll: false, preservePP: false });
     if (!flash.ok) {
       esp.terminalWriteLine(`\x1b[1;31mError: ${flash.error}\x1b[0m`);
       setDialog({ mode: "flash-error", message: flash.error });

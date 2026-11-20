@@ -25,7 +25,7 @@ try {
         if ($start -lt 0) { continue }
         try { $status = $line.Substring($start) | ConvertFrom-Json } catch { continue }
         if ($status.app -ne 'PA-Terminal') { continue }
-        $status | Select-Object app,version,elf_sha256,protocol,connected,wake_cause,heap,largest,minimum,cache_ready | ConvertTo-Json -Compress
+        $status | Select-Object app,version,elf_sha256,protocol,connected,wake_cause,heap,largest,minimum,cache_ready,cache_stack_min_free | ConvertTo-Json -Compress
         exit 0
     }
     Write-Output 'No pp.status response.'

@@ -1,4 +1,7 @@
 """Deterministic PP Lab scenes on any PassportSim instance."""
+import base64
+import hashlib
+import io
 import json
 import re
 from time import monotonic
@@ -67,10 +70,19 @@ async def run(lab, machine, image, scenario, spec, *, fault=False, expected=None
                 check(action, want, step["actual"], reply)
             except Exception as exc:
                 error = str(exc)
-            if index == 0 or last or action.get("capture") or error:
+            region = action.get("screenRegion")
+            if index == 0 or last or action.get("capture") or region or error:
                 step["tree"] = tree
                 try:
                     step["screen"] = await machine.invoke("screen")
+                    if region:
+                        from PIL import Image
+                        png = base64.b64decode(step["screen"].split(",", 1)[1], validate=True)
+                        with Image.open(io.BytesIO(png)) as frame:
+                            pixels = frame.crop(region["rect"]).convert("RGB").tobytes()
+                        step["screenRegionSha256"] = hashlib.sha256(pixels).hexdigest()
+                        if step["screenRegionSha256"] != region["rgbSha256"]:
+                            error = error or f"LCD 区域 {region['rect']} 与预期不符"
                 except Exception as exc:
                     step["captureError"] = str(exc)
                     error = error or f"无法保留 LCD 截图（{exc}）"

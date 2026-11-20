@@ -49,7 +49,7 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
     try {
       const image = app.image[matchedChip.toLowerCase()];
       const parts = resolvePublishedParts(image);
-      const result = await esp.downloadAndFlashParts(parts, {eraseAll: false});
+      const result = await esp.downloadAndFlashParts(parts, {eraseAll: false, preservePP: true, upgradePolicy: image.upgrade_policy});
       if (!result.ok) throw new Error(result.error || "安装未完成，请查看串口日志。");
       written = true;
       setInstalled(selected);
@@ -126,7 +126,7 @@ export function QuickStartTab({goToConsole, onFlashStatus}: {
     <Dialog open={confirm} onOpenChange={setConfirm}>
       <DialogContent>
         <DialogHeader><DialogTitle>确认安装 {selected}</DialogTitle></DialogHeader>
-        <p className="text-sm leading-7">目标：{app.board}，当前芯片：{esp.chipDesc}。即将替换运行固件。{app.channel === "preview" ? "此版本为预览版，由使用者安装体验并反馈问题。" : app.channel === "daily" ? "此版本用于日常使用，完整验收范围见操作说明。" : app.acceptance === "verified" ? "此版本已完成记录中的真机验收。" : "此版本真机待验收。"}确认设备及版本后再继续，安装期间不要断电或拔线。</p>
+        <p className="text-sm leading-7">目标：{app.board}，当前芯片：{esp.chipDesc}。安装前会读取设备分区表，保留配置和历史数据，仅写入有变化的镜像。{app.channel === "preview" ? "此版本为预览版，由使用者安装体验并反馈问题。" : app.channel === "daily" ? "此版本用于日常使用，完整验收范围见操作说明。" : app.acceptance === "verified" ? "此版本已完成记录中的真机验收。" : "此版本真机待验收。"}确认设备及版本后再继续，安装期间不要断电或拔线。</p>
         <DialogFooter><Button variant="outline" onClick={() => setConfirm(false)}>取消</Button><Button onClick={() => void install()} disabled={pending || !matchedChip}>确认并安装</Button></DialogFooter>
       </DialogContent>
     </Dialog>

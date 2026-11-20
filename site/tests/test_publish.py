@@ -71,6 +71,23 @@ class PublishTest(unittest.TestCase):
             self.assertIn("LICENSE.folotoy",archive.namelist())
             self.assertNotIn("debug.elf",archive.namelist())
 
+    def test_terminal_release_refuses_to_remove_a_previously_protected_partition(self):
+        self.manifest["application"] = "PA-Terminal"
+        def checksummed_table(label):
+            rows = self.table(0x3f0000)[:-32]
+            rows += struct.pack("<HBBII16sI", 0x50aa, 1, 0x83, 0x780000, 0x80000, label, 0)
+            return (rows + b"\xeb\xeb" + b"\xff"*14 + hashlib.md5(rows).digest()).ljust(0xc00, b"\xff")
+        self.replace_image("partition-table.bin", checksummed_table(b"pp_cache"))
+        for _ in range(2):
+            pub.publish(self.candidate, "terminal", "test", self.readme)
+        cfg = tomllib.loads((pub.SITE / "config/pp.toml").read_text())
+        self.assertEqual(cfg["PA-Terminal · 0.1.0"]["image"]["esp32-c3"]["upgrade_policy"], "pp-data-v1")
+        self.manifest["version"] = "0.2.0"
+        self.replace_image("partition-table.bin", checksummed_table(b"new_cache"))
+        with self.assertRaisesRegex(ValueError, "pp_cache"):
+            pub.publish(self.candidate, "terminal", "test", self.readme)
+        self.assertFalse((self.root / "releases/terminal/0.2.0").exists())
+
     def test_corrupt_candidate_never_publishes(self):
         (self.candidate/"app.bin").write_bytes(b"invalid")
         with self.assertRaises(ValueError): pub.publish(self.candidate,"example","description",self.readme)

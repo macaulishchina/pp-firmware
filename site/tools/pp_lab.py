@@ -127,6 +127,8 @@ class Lab:
         integration = evidence_signature(firmware, integration_host)
         unit = evidence_signature(firmware, digest(SITE, [
             Path("tests/test_pp_lab.py"), Path("tools/pp_lab.py"),
+            Path("tools/install_firmware.py"), Path("tools/upgrade_plan.mjs"), Path("tools/publish.py"),
+            Path("src/lib/pp/upgrade.mjs"), Path("tests/test_install_firmware.py"), Path("tests/test_publish.py"),
         ]))
         release_paths = [self.release_profile]
         if self.release_ca:
@@ -220,6 +222,8 @@ class Lab:
                                  self.pa / FIRMWARE / "tests", "-p", "test_*.py"])
             self.log(run, name, [self.python, "-m", "unittest", "discover", "-s",
                                  "tests", "-p", "test_pp_lab.py"])
+            for test in ("test_install_firmware.py", "test_publish.py"):
+                self.log(run, name, [self.python, SITE / "tests" / test])
         elif name == "integration":
             self.log(run, name, [self.python, "-m", "unittest", "test_ai_passport", "test_passport_protocol",
                                  "test_passport_settings", "test_passport_hardware", "test_terminal_delivery"],

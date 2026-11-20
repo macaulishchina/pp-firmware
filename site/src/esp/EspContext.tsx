@@ -13,6 +13,7 @@ import type { FitAddon } from "xterm-addon-fit";
 import { IconTextActionCard } from "@espressif/dashboard-ui-components";
 import { Cpu } from "lucide-react";
 import { md5 } from "js-md5";
+import { changedPPImages } from "../lib/pp/install";
 import { verifyImage } from "../lib/publishedFirmware";
 import { fitTerminalColumns } from "../lib/terminal";
 import {
@@ -62,6 +63,8 @@ export interface ConnectResult {
 export interface FlashOverrides {
   /** Erase the whole flash before writing. Defaults to false. */
   eraseAll?: boolean;
+  preservePP?: boolean;
+  upgradePolicy?: string;
 }
 
 export interface FlashResult {
@@ -401,7 +404,7 @@ export function EspProvider({ children }: { children: ReactNode }) {
   }, [reportToTerminal, runFlashOperation]);
 
   const writeFlash = useCallback(
-    (files: FlashFile[], eraseAll = false): Promise<FlashResult> => {
+    (files: FlashFile[], eraseAll = false, preservePP = false, policy?: string): Promise<FlashResult> => {
       const flashOptions: FlashOptions = {
         fileArray: files,
         flashSize: "keep",
@@ -411,7 +414,20 @@ export function EspProvider({ children }: { children: ReactNode }) {
         compress: true,
         calculateMD5Hash: (image) => md5(image),
       };
-      return runFlashOperation((loader) => loader.writeFlash(flashOptions));
+      return runFlashOperation(async loader => {
+        if (preservePP) {
+          if (eraseAll) throw new Error("保留数据安装不能整片擦除。");
+          flashOptions.fileArray = await changedPPImages(loader, files, policy, async copy => {
+            termRef.current?.writeln("正在迁移并校验设备上的历史缓存，请保持 USB 连接。");
+            await loader.writeFlash({...flashOptions, fileArray: [copy]});
+          });
+          if (!flashOptions.fileArray.length) {
+            termRef.current?.writeln("设备镜像已与所选固件一致，跳过写入。");
+            return;
+          }
+        }
+        await loader.writeFlash(flashOptions);
+      });
     },
     [runFlashOperation],
   );
@@ -442,6 +458,7 @@ export function EspProvider({ children }: { children: ReactNode }) {
       flashModeRef.current = "quickstart";
       setBusy(true);
       try {
+        const preservePP = overrides.preservePP ?? true;
         const files: FlashFile[] = [];
         for (const part of parts) {
           const data = await getImageData(part.url);
@@ -449,6 +466,8 @@ export function EspProvider({ children }: { children: ReactNode }) {
             termRef.current?.writeln(`Image file not found: ${part.url}`);
             return { ok: false, error: `Unable to download firmware image: ${part.url}` };
           }
+          if (preservePP && (part.size === undefined || !part.sha256))
+            return {ok: false, error: "固件缺少完整性校验，未开始写入。"};
           if (part.size !== undefined && part.sha256) {
             try {
               await verifyImage(data, {size: part.size, sha256: part.sha256});
@@ -458,7 +477,7 @@ export function EspProvider({ children }: { children: ReactNode }) {
           }
           files.push({ data, address: part.address });
         }
-        return await writeFlash(files, overrides.eraseAll ?? false);
+        return await writeFlash(files, overrides.eraseAll ?? false, preservePP, overrides.upgradePolicy);
       } finally {
         setBusy(false);
       }

@@ -8,10 +8,13 @@ export interface PublishedPart {
 export interface PublishedImage {
   parts: string[];
   addresses: (string | number)[];
+  upgrade_policy?: string;
   sizes: number[];
   sha256: string[];
 }
 export function resolvePublishedParts(image: PublishedImage): PublishedPart[] {
+  if (image?.upgrade_policy !== undefined && !["pp-data-v1", "pp-data-v2"].includes(image.upgrade_policy))
+    throw new Error("此固件要求更新安装器，未开始写入。");
   const count = image?.parts?.length;
   if (!count || !Array.isArray(image.addresses) || !Array.isArray(image.sizes) || !Array.isArray(image.sha256) ||
       image.addresses.length !== count || image.sizes.length !== count || image.sha256.length !== count) {
