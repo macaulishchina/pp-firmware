@@ -107,6 +107,9 @@ function sleepDevice() {
   model.sleep();
   render();
 }
+function canStandbyFromHome() {
+  return model.view === 'home' && model.homeOnly && !model.sleeping && !setupHome() && model.canSleep;
+}
 function wakeDevice() {
   model.wake();
   if (!model.wifi.connected && provisioning.savedWifi && provisioning.stage !== 'hotspot') {
@@ -790,6 +793,7 @@ function menuOK() {
 bindHardwareKeys({
   ...hardware, press: pressOK, release: releaseOK, abort: cancelPress, move, home: returnHome,
   canJumpLatest, latest: jumpLatest,
+  canStandby: canStandbyFromHome, standby: sleepDevice,
 });
 document.addEventListener('keydown', e => {
   if (e.code === 'Escape' && !e.target.closest('input,select,textarea')) returnHome();

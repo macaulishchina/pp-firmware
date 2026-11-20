@@ -1,7 +1,11 @@
 import { PP_PROFILE } from './profile.js';
 
 /** The three keys share one ADC. A gesture owns it until release or cancellation. */
-export function bindHardwareKeys({ ok, up, down, press, release, abort, move, home, canJumpLatest, latest }) {
+export function bindHardwareKeys({
+  ok, up, down, press, release, abort, move, home, canJumpLatest, latest,
+  canStandby, standby,
+}) {
+  const { arrowHoldMs, standbyHoldMs } = PP_PROFILE.interaction;
   const subscriptions = [];
   const on = (target, event, handler) => {
     target.addEventListener(event, handler);
@@ -11,25 +15,38 @@ export function bindHardwareKeys({ ok, up, down, press, release, abort, move, ho
   let active = null;
 
   function begin(key, source, allowHold = true) {
-    const gesture = { key, source, consumed: false, timer: null };
+    const standbyStarted = allowHold && key === up && canStandby() ? performance.now() : null;
+    const gesture = { key, source, standbyStarted, consumed: false, timer: null };
     active = gesture;
     if (key === ok) press();
-    else if (allowHold && (key === up || canJumpLatest())) {
+    else if (standbyStarted !== null) {
+      gesture.timer = setTimeout(() => {
+        if (active !== gesture) return;
+        gesture.consumed = true;
+        if (canStandby()) standby();
+      }, standbyHoldMs);
+    } else if (allowHold && (key === up || canJumpLatest())) {
       gesture.timer = setTimeout(() => {
         if (active !== gesture) return;
         gesture.consumed = true;
         if (key === up) home();
         else if (canJumpLatest()) latest();
-      }, PP_PROFILE.interaction.arrowHoldMs);
+      }, arrowHoldMs);
     }
   }
 
   function finish(cancelReason) {
     if (!active) return;
-    const { key, source, consumed, timer } = active;
+    const { key, source, standbyStarted, consumed, timer } = active;
     active = null;
     clearTimeout(timer);
     if (typeof source === 'number' && key.hasPointerCapture(source)) key.releasePointerCapture(source);
+    if (standbyStarted !== null) {
+      const elapsed = performance.now() - standbyStarted;
+      if (cancelReason) return;
+      if (!consumed && elapsed >= standbyHoldMs && canStandby()) { standby(); return; }
+      if (elapsed >= arrowHoldMs || !canStandby()) return;
+    }
     if (cancelReason) {
       if (key === ok) abort(cancelReason);
     } else if (key === ok) release();

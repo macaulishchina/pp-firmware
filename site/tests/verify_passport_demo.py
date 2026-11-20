@@ -395,7 +395,41 @@ async def verify(url, synthetic_report=False):
         await phase("connectivity")  # Successful handshake preserves the local page.
         await home()
 
+        standby_ms = await page.evaluate(
+            "async () => (await import('./core/profile.js')).PP_PROFILE.interaction.standbyHoldMs"
+        )
+        await next_ok()
+        await phase("menu")
+        await up.hover()
+        await page.mouse.down()
+        await phase("idle")
+        await page.wait_for_timeout(standby_ms + 50)
+        await phase("idle")
+        await page.mouse.up()
+        await phase("idle")
+
+        await page.keyboard.down("ArrowUp")
+        await page.wait_for_timeout(850)
+        await page.keyboard.up("ArrowUp")
+        await phase("idle")
+        await page.keyboard.down("ArrowUp")
+        await page.wait_for_timeout(850)
+        await page.evaluate("window.dispatchEvent(new Event('blur'))")
+        await page.keyboard.up("ArrowUp")
+        await page.wait_for_timeout(standby_ms)
+        await phase("idle")
+
+        await up.hover()
+        await page.mouse.down()
+        await phase("sleeping")
+        await page.mouse.up()
+        await phase("sleeping")
         await open_panel("debug")
+        await expect(page.locator("#network-toggle")).to_have_text("断开 Wi-Fi")
+        await expect(page.locator("#pa-state")).to_have_value("offline")
+        await up.click()
+        await phase("idle")
+        await expect(page.locator("#pa-state")).to_have_value("online")
         status = page.locator("#panel-debug").get_by_text("设备状态", exact=True)
         slider = page.locator("#battery-level")
         if not await slider.is_visible():
