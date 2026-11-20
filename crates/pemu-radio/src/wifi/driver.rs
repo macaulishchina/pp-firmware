@@ -49,6 +49,7 @@ pub const ESP_ERR_WIFI_CONN: u32 = 0x3007;
 /// 12309: the `esp_wifi_internal_tx` answer for a started station that is not associated.
 pub const ESP_ERR_WIFI_NOT_ASSOC: u32 = 0x3015;
 const ESP_ERR_WIFI_NOT_CONNECT: u32 = 0x300f;
+const WIFI_REASON_BEACON_TIMEOUT: u32 = 200;
 /// `WIFI_MODE_STA`.
 pub const MODE_STA: u32 = 1;
 /// `WIFI_MODE_AP`; it and `WIFI_MODE_APSTA` create the SoftAP interface.
@@ -2077,7 +2078,7 @@ impl ModuleHost for WifiHost {
         &mut self,
         state: &mut Vec<u8>,
         payload: &[u8],
-        _g: &mut dyn GuestView,
+        g: &mut dyn GuestView,
     ) -> Result<Vec<RadioEvent>, HleError> {
         let mut r = SnapReader::new(payload, "input.env.wifi_aps");
         let aps = Vec::<ScriptedAp>::snap_read(&mut r).map_err(|e| {
@@ -2102,6 +2103,24 @@ impl ModuleHost for WifiHost {
             ));
         }
         let mut st = WifiState::decode(state)?;
+        if st.state == DriverState::Connected
+            && st.peer.as_ref().is_some_and(|peer| {
+                !aps.iter().any(|ap| ap.ssid == peer.ssid && ap.bssid == peer.bssid)
+            })
+        {
+            // Removing the associated AP represents beacon loss. Only a new guest
+            // connect request may rejoin it after it returns to the scripted air.
+            let peer = st.peer.take();
+            st.state = DriverState::Started;
+            let data = self.disconnected_payload(&st, peer.as_ref(), WIFI_REASON_BEACON_TIMEOUT);
+            self.queue_event(
+                &mut st,
+                g,
+                self.profile.driver.event_sta_disconnected,
+                &data,
+                false,
+            );
+        }
         st.aps = aps;
         *state = st.encode();
         Ok(Vec::new())
@@ -3400,6 +3419,52 @@ mod tests {
             run_immediate(h, st, g, handler::SET_CONFIG, [0, CFG]),
             ESP_OK
         );
+    }
+
+    #[test]
+    fn removing_the_associated_access_point_reports_loss_once() {
+        let mut h = host();
+        let mut g = Guest::default();
+        let peer = ap("phone", -55, 6, 0);
+        let other = ap("other", -65, 11, 0);
+        let mut state = WifiState {
+            state: DriverState::Connected,
+            aps: vec![peer.clone(), other.clone()],
+            peer: Some(peer.clone()),
+            ..Default::default()
+        }
+        .encode();
+
+        let mut air = Vec::new();
+        vec![peer.clone()].snap_write(&mut air);
+        h.on_input(&mut state, &air, &mut g).unwrap();
+        let current = WifiState::decode(&state).unwrap();
+        assert_eq!(current.state, DriverState::Connected);
+        assert!(current.outbox.is_empty());
+
+        air.clear();
+        vec![other].snap_write(&mut air);
+        h.on_input(&mut state, &air, &mut g).unwrap();
+        let current = WifiState::decode(&state).unwrap();
+        assert_eq!(current.state, DriverState::Started);
+        assert!(current.peer.is_none());
+        assert_eq!(current.outbox.len(), 1);
+        let data = &current.outbox[0].payload;
+        assert_eq!(
+            data[..4],
+            h.profile.driver.event_sta_disconnected.to_le_bytes()
+        );
+        assert_eq!(
+            data[4 + h.profile.driver.disconnected_reason_off as usize],
+            WIFI_REASON_BEACON_TIMEOUT as u8
+        );
+
+        air.clear();
+        vec![peer].snap_write(&mut air);
+        h.on_input(&mut state, &air, &mut g).unwrap();
+        let current = WifiState::decode(&state).unwrap();
+        assert_eq!(current.state, DriverState::Started);
+        assert_eq!(current.outbox.len(), 1);
     }
 
     /// Returns 0 at once, then two `STA_DISCONNECTED`, reason 201 then 36, at one instant. The

@@ -102,6 +102,13 @@ builds = "probe_wifi_http"
 size = 216
 code_sha256 = "a8663cb6b7bd927d59b455cfce2322801b9aae4f91515ee73c5c0e8cf220617b"
 
+# PA-Terminal enables CONFIG_PM_ENABLE; the ESP-IDF wrapper also initializes power management.
+# The simulator models link behavior; this shape makes no assertion about hardware power draw.
+[[variant]]
+builds = "pa_terminal"
+size = 422
+code_sha256 = "ba4cb5dd47a93f5ae876751aa8f6c093b3215b5199f2d470f624236eaf1f60af"
+
 [[hook]]
 name = "esp_wifi_deinit"
 handler = 1
