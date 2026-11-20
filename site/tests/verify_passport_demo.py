@@ -13,6 +13,14 @@ async def verify(url, synthetic_report=False):
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page(ignore_https_errors=True, viewport={"width": 1350, "height": 900})
+        await page.add_init_script("""(() => {
+            window.recordingCues = 0;
+            const start = OscillatorNode.prototype.start;
+            OscillatorNode.prototype.start = function (...args) {
+                window.recordingCues++;
+                return start.apply(this, args);
+            };
+        })();""")
         base = url.rsplit("/", 1)[0] + "/"
         errors, external = [], []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -163,7 +171,9 @@ async def verify(url, synthetic_report=False):
         await expect(screen).to_have_attribute("data-selected", "屏幕亮度 · 65%")
         await home()
 
+        cues_before = await page.evaluate("window.recordingCues")
         await hold()
+        assert await page.evaluate("window.recordingCues") == cues_before + 2
         await phase("processing")
         await expect(content).to_contain_text("等待回复")
         active_dot = """() => {
@@ -378,7 +388,20 @@ async def verify(url, synthetic_report=False):
         await expect(content).to_contain_text("从 PA 获取设备设置")
         await expect(content).to_contain_text("更换 PA 配对")
         await expect(content).to_contain_text("恢复出厂设置")
-        await select_from_start(1)
+        await select_from_start(2)
+        await phase("about")
+        firmware = await page.evaluate("async () => (await (await fetch('lab/parity.json')).json()).version")
+        for label in ("关于设备", "FoloToy AI Passport", "芯片 ESP32-C3", "闪存 8MB", f"固件 {firmware}", "协议 2"):
+            await expect(content).to_contain_text(label)
+        text_before = await content.text_content()
+        await down.click()
+        await up.click()
+        assert await content.text_content() == text_before
+        await next_ok()
+        await phase("maintenance")
+        await expect(screen).to_have_attribute("data-selected", "关于设备")
+        await up.click()
+        await next_ok()
         await phase("device-reset")
         await expect(content).to_contain_text("保留 Wi-Fi")
         await next_ok()  # Cancel returns to the same row.
@@ -403,6 +426,7 @@ async def verify(url, synthetic_report=False):
         await up.hover()
         await page.mouse.down()
         await phase("idle")
+        await expect(content).not_to_contain_text("继续长按将休眠")
         await page.wait_for_timeout(standby_ms + 50)
         await phase("idle")
         await page.mouse.up()
@@ -413,7 +437,13 @@ async def verify(url, synthetic_report=False):
         await page.keyboard.up("ArrowUp")
         await phase("idle")
         await page.keyboard.down("ArrowUp")
-        await page.wait_for_timeout(850)
+        await expect(content).to_contain_text("继续长按将休眠")
+        await page.keyboard.up("ArrowUp")
+        await expect(content).not_to_contain_text("继续长按将休眠")
+        await phase("idle")
+
+        await page.keyboard.down("ArrowUp")
+        await expect(content).to_contain_text("继续长按将休眠")
         await page.evaluate("window.dispatchEvent(new Event('blur'))")
         await page.keyboard.up("ArrowUp")
         await page.wait_for_timeout(standby_ms)
@@ -421,6 +451,7 @@ async def verify(url, synthetic_report=False):
 
         await up.hover()
         await page.mouse.down()
+        await expect(content).to_contain_text("继续长按将休眠")
         await phase("sleeping")
         await page.mouse.up()
         await phase("sleeping")

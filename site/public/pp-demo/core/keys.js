@@ -3,9 +3,9 @@ import { PP_PROFILE } from './profile.js';
 /** The three keys share one ADC. A gesture owns it until release or cancellation. */
 export function bindHardwareKeys({
   ok, up, down, press, release, abort, move, home, canJumpLatest, latest,
-  canStandby, standby,
+  canStandby, standbyHint, standby,
 }) {
-  const { arrowHoldMs, standbyHoldMs } = PP_PROFILE.interaction;
+  const { arrowHoldMs, standbyHintMs, standbyHoldMs } = PP_PROFILE.interaction;
   const subscriptions = [];
   const on = (target, event, handler) => {
     target.addEventListener(event, handler);
@@ -16,14 +16,18 @@ export function bindHardwareKeys({
 
   function begin(key, source, allowHold = true) {
     const standbyStarted = allowHold && key === up && canStandby() ? performance.now() : null;
-    const gesture = { key, source, standbyStarted, consumed: false, timer: null };
+    const gesture = { key, source, standbyStarted, consumed: false, timer: null, hintTimer: null };
     active = gesture;
     if (key === ok) press();
     else if (standbyStarted !== null) {
+      gesture.hintTimer = setTimeout(() => {
+        if (active === gesture && canStandby()) standbyHint(true);
+      }, standbyHintMs);
       gesture.timer = setTimeout(() => {
         if (active !== gesture) return;
         gesture.consumed = true;
         if (canStandby()) standby();
+        standbyHint(false);
       }, standbyHoldMs);
     } else if (allowHold && (key === up || canJumpLatest())) {
       gesture.timer = setTimeout(() => {
@@ -37,12 +41,14 @@ export function bindHardwareKeys({
 
   function finish(cancelReason) {
     if (!active) return;
-    const { key, source, standbyStarted, consumed, timer } = active;
+    const { key, source, standbyStarted, consumed, timer, hintTimer } = active;
     active = null;
     clearTimeout(timer);
+    clearTimeout(hintTimer);
     if (typeof source === 'number' && key.hasPointerCapture(source)) key.releasePointerCapture(source);
     if (standbyStarted !== null) {
       const elapsed = performance.now() - standbyStarted;
+      standbyHint(false);
       if (cancelReason) return;
       if (!consumed && elapsed >= standbyHoldMs && canStandby()) { standby(); return; }
       if (elapsed >= arrowHoldMs || !canStandby()) return;

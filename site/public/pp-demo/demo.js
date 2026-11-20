@@ -3,12 +3,17 @@ import { PP_PROFILE } from './core/profile.js';
 import { mountDeviceShell } from './core/device-shell.js';
 import { bindHardwareKeys } from './core/keys.js';
 import { mountDisplay } from './core/display.js';
-import { demoVoiceLevel } from './core/voice.js';
+import { demoVoiceLevel, playRecordingCue, prepareRecordingCues } from './core/voice.js';
 import { DemoProvisioning } from './core/provisioning.js';
 
 const $ = id => document.getElementById(id);
 const hardware = mountDeviceShell($('device-host'));
-const display = await mountDisplay(hardware.canvas);
+const [display, firmwareBaseline] = await Promise.all([
+  mountDisplay(hardware.canvas),
+  fetch(new URL('./lab/parity.json', import.meta.url))
+    .then(response => response.ok ? response.json() : null)
+    .catch(() => null),
+]);
 const clockFormat = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Shanghai' });
 const escape = text => String(text).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let preferences = {};
@@ -25,6 +30,7 @@ let pressMenuChoice = '';
 let wifiHold = false, wifiHoldConsumed = false;
 let recordInterval = null, feedbackTimer = null;
 let secondTap = false;
+let standbyHint = false;
 let volumeFeedbackUntil = 0, volumeSaveTimer = null;
 let brightnessDraft = model.brightness;
 let followResponse = true;
@@ -109,6 +115,11 @@ function sleepDevice() {
 }
 function canStandbyFromHome() {
   return model.view === 'home' && model.homeOnly && !model.sleeping && !setupHome() && model.canSleep;
+}
+function setStandbyHint(show) {
+  if (standbyHint === show) return;
+  standbyHint = show;
+  renderScreen();
 }
 function wakeDevice() {
   model.wake();
@@ -432,6 +443,12 @@ function renderScreen(phase = screenPhase()) {
       info('网络状态', pages[model.page], hint);
       break;
     }
+    case 'about': {
+      const { model, chip, flash } = PP_PROFILE.hardware;
+      info('关于设备', `${model}\n芯片 ${chip}\n闪存 ${flash}\n固件 ${firmwareBaseline?.version || '未知'}\n协议 ${PP_PROFILE.protocolVersion}`,
+        'OK 返回 · 长↑主页');
+      break;
+    }
     case 'device-reset':
       info(provisioning.resetTarget === 'factory' ? '恢复出厂设置？' : provisioning.resetTarget === 'repair' ? '更换 PA 配对？' : '设置 Wi-Fi？',
         provisioning.resetTarget === 'factory'
@@ -450,6 +467,7 @@ function renderScreen(phase = screenPhase()) {
       else if (model.work === 'processing' || model.work === 'responding') frame.state = '后台处理中';
   }
   if (model.feedback && phase !== 'sleeping') frame.state = model.feedback;
+  if (standbyHint && canStandbyFromHome()) frame.hint = '继续长按将休眠';
   frame.awaitingReply = phase === 'processing' && !model.feedback;
   if (model.playing) frame.volumeFeedback ||= performance.now() < volumeFeedbackUntil;
   hardware.screen.dataset.phase = phase;
@@ -472,7 +490,7 @@ function render() {
     idle: '就绪', recording: '正在收音', finalizing: '等待最终转写', processing: '处理中',
     responding: '接收回复', playing: '模拟播放', reply: '回复已收到', clarifying: '等待回答',
     menu: '操作菜单', sound: '声音与屏幕', connectivity: '网络与配对', power: '电源与待机',
-    maintenance: 'PA 与维护', volume: '调整音量', brightness: '调整亮度', notices: '任务消息',
+    maintenance: 'PA 与维护', about: '关于设备', volume: '调整音量', brightness: '调整亮度', notices: '任务消息',
     notice: '查看任务报告', history: '查看历史', status: '网络状态', 'device-reset': '等待确认',
     error: '请求未完成', offline: model.wifi.connected ? 'PA 离线' : '', sleeping: '设备休眠', hotspot: '等待手机配网',
     revoked: '配对被拒绝', pairing: '等待 PA 配对', 'wifi-trying': '',
@@ -556,6 +574,7 @@ function pressOK() {
   }
   if (setupHome() || model.input === 'review') return;
   if (model.view === 'history') {
+    if (model.online && model.volume) prepareRecordingCues();
     const version = historyView.version;
     holdTimer = later(() => {
       if (!pressed || version !== historyView.version) return;
@@ -568,6 +587,7 @@ function pressOK() {
   clearTimeout(clickTimer); clickTimer = null;
   if (!model.online) { feedback('未连接 PA'); return; }
   if (model.input !== 'idle') { feedback('上一句正在确认，还没有重新收音'); return; }
+  if (model.volume) prepareRecordingCues();
   stoppedOnPress = model.stopPlayback();
   if (stoppedOnPress) { render(); }
   holdTimer = later(() => {
@@ -576,6 +596,7 @@ function pressOK() {
 }
 function startRecording() {
   if (model.startInput() === null) return;
+  playRecordingCue(true, model.volume);
   render();
   recordInterval = setInterval(() => {
     model.elapsed = (performance.now() - pressStarted) / 1000;
@@ -623,7 +644,9 @@ function finishOK() {
   if (model.view !== 'home') { menuOK(); return; }
   if (model.input === 'recording') {
     stopRecordClock();
-    const version = model.releaseInput(); render();
+    const version = model.releaseInput();
+    playRecordingCue(false, model.volume);
+    render();
     later(() => startWork(model.finishInput(version)), simulation.recognitionMs);
     stoppedOnPress = false;
     return;
@@ -787,13 +810,13 @@ function menuOK() {
     model.noticeIndex = Math.max(0, model.notices.indexOf(model.activeNotice));
     model.view = 'notices';
   }
-  else model.openView(model.view === 'status' ? 'connectivity' : 'sound', true);
+  else model.openView({ status: 'connectivity', about: 'maintenance' }[model.view] || 'sound', true);
   render();
 }
 bindHardwareKeys({
   ...hardware, press: pressOK, release: releaseOK, abort: cancelPress, move, home: returnHome,
   canJumpLatest, latest: jumpLatest,
-  canStandby: canStandbyFromHome, standby: sleepDevice,
+  canStandby: canStandbyFromHome, standbyHint: setStandbyHint, standby: sleepDevice,
 });
 document.addEventListener('keydown', e => {
   if (e.code === 'Escape' && !e.target.closest('input,select,textarea')) returnHome();

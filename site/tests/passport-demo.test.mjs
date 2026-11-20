@@ -68,7 +68,7 @@ test('the operation menu groups settings and only shows cancellation for active 
   m.openView('power');
   assert.equal(m.menus.find(item => item.id === 'standby-wifi').value, '开');
   m.openView('maintenance');
-  assert.deepEqual(m.menus.map(item => item.id), ['reload', 'repair', 'factory', 'back']);
+  assert.deepEqual(m.menus.map(item => item.id), ['reload', 'repair', 'about', 'factory', 'back']);
   assert.equal(m.menus[0].detail, '从 PA 获取设备设置');
 });
 

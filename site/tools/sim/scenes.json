@@ -21,7 +21,7 @@
     ]
   },
   "offline-maintenance": {
-    "title": "离线网络诊断、维护确认和返回焦点",
+    "title": "离线网络诊断、关于设备、维护确认和返回焦点",
     "steps": [
       {"name": "开机进入设备连接", "expect": ["设备连接", "OK 菜单"]},
       {"name": "打开双列菜单", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["操作菜单", "任务消息", "声音与屏幕", "网络与配对", "电源与待机", "返回主页"], "capture": true},
@@ -36,6 +36,10 @@
       {"name": "打开 PA 与维护", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["PA 与维护", "同步 PA 设置", "更换 PA 配对", "恢复出厂设置", "返回上级", "从 PA 获取设备设置"], "capture": true},
       {"name": "离线同步给出明确提示", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["PA 与维护", "请先连上 PA 再同步"]},
       {"name": "查看更换配对的说明", "key": "down", "expect": ["PA 与维护", "保留 Wi-Fi，绑定新会话"]},
+      {"name": "选中关于设备", "key": "down", "expect": ["PA 与维护", "关于设备", "查看硬件和固件版本"]},
+      {"name": "离线打开关于设备", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["关于设备", "OK 返回 · 长↑主页"], "contains": ["FoloToy AI Passport", "芯片 ESP32-C3", "闪存 8MB", "固件 0.", "协议 2"], "capture": true},
+      {"name": "关于设备页保持同屏信息", "key": "down", "expect": ["关于设备", "OK 返回 · 长↑主页"], "contains": ["FoloToy AI Passport", "芯片 ESP32-C3", "闪存 8MB", "固件 0.", "协议 2"]},
+      {"name": "按 OK 回到关于设备的原焦点", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["PA 与维护", "关于设备", "查看硬件和固件版本"]},
       {"name": "查看恢复出厂的说明", "key": "down", "expect": ["PA 与维护", "清除本机网络与配对"]},
       {"name": "进入恢复出厂确认", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["恢复出厂设置？", "上下选择 · OK取消"], "capture": true},
       {"name": "选择默认取消", "key": "ok", "ms": 100, "waitMs": 350, "expect": ["PA 与维护", "同步 PA 设置", "更换 PA 配对", "恢复出厂设置", "返回上级", "已取消"]},

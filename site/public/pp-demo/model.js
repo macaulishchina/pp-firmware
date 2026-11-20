@@ -119,6 +119,7 @@ export class PassportModel {
     if (this.view === 'maintenance') return [
       { id: 'reload', label: '同步 PA 设置', detail: '从 PA 获取设备设置' },
       { id: 'repair', label: '更换 PA 配对', detail: '保留 Wi-Fi，绑定新会话' },
+      { id: 'about', label: '关于设备', detail: '查看硬件和固件版本' },
       { id: 'factory', label: '恢复出厂设置', detail: '清除本机网络与配对' },
       back,
     ];
