@@ -1,6 +1,70 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.2.1-preview.8", "PA-Terminal · 0.2.1-preview.7", "PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.1-preview.24", "PA-Terminal · 0.2.1-preview.22", "PA-Terminal · 0.2.1-preview.10", "PA-Terminal · 0.2.1-preview.9", "PA-Terminal · 0.2.1-preview.8", "PA-Terminal · 0.2.1-preview.7", "PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.1-preview.24"]
+description = "改善弱网录音与播报连续性。扩展播放缓冲和三处音频对账需要配套 PA。真机弱网播放待验收。"
+version = "0.2.1-preview.24"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.24/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.24/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.24/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.24/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.24/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.24/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 3012432]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "920aae34e468c696be74b9c4524eecb0302462b324980f262e02e2a8a4dfe512"]
+
+["PA-Terminal · 0.2.1-preview.22"]
+description = "新增低功耗 Wi-Fi 待机，改善播报连续性与长文本处理，支持流式高清看图。播报改进需配套 PA 更新。"
+version = "0.2.1-preview.22"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.22/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.22/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.22/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.22/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.22/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.22/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 3010288]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "5fe5660a94dd79ef179f1dcebc293a17f832f5863de40c56d9a26dc565c76acb"]
+
+["PA-Terminal · 0.2.1-preview.10"]
+description = "统一缓冲与离线缓存，减少录音内存占用，改善图片读取与断线恢复"
+version = "0.2.1-preview.10"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.10/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.10/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.10/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.10/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.10/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.10/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2987600]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "312d176ecef5a60d6b66bed588141607243a48ca3fb6cd8119ed8b8299044cb2"]
+
+["PA-Terminal · 0.2.1-preview.9"]
+description = "修复录音启动缓冲溢出，改善慢速连接和断线后重录"
+version = "0.2.1-preview.9"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.9/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.9/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.9/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.9/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.9/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.9/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 2979808]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "890c679def7a768ac7b4de56b0a6c94c589520c2d9a39d63bdd9c91c9af71211"]
 
 ["PA-Terminal · 0.2.1-preview.8"]
 description = "修复识别失败后反复提示语音忙及输入状态变化，保留原设备配置。"
