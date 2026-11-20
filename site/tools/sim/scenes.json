@@ -59,5 +59,30 @@
       {"name": "长按上回到热点页", "key": "up", "expect": ["设备连接", "OK 菜单"], "ms": 850},
       {"name": "检查设备依然等待配网", "expect": ["设备连接"], "serial": "pp.status", "serialContains": ["\"app\":\"PA-Terminal\"", "\"connected\":false"]}
     ]
+  },
+  "local-photo-pages": {
+    "title": "离线首次翻看图片（六条合成记录，第 4 条为三图，前两张有预览）",
+    "steps": [
+      {"name": "跳到本地末尾", "key": "down", "ms": 850, "expect": [], "contains": ["First"]},
+      {"name": "翻到图片后一条消息", "key": "up", "expect": [], "contains": ["Record 5"]},
+      {"name": "反向进入第三张，缺图仍可导航", "key": "up", "expect": [], "contains": ["此图未保存预览"]},
+      {"name": "第二张直接显示离线预览", "key": "up", "expect": [], "contains": ["图片预览"], "capture": true},
+      {"name": "第一张直接显示离线预览", "key": "up", "expect": [], "contains": ["图片预览"], "capture": true},
+      {"name": "回到前一条文字消息", "key": "up", "expect": [], "contains": ["Record 3"]},
+      {"name": "正向进入第一张图片", "key": "down", "expect": [], "contains": ["图片预览"], "capture": true}
+    ]
+  },
+  "local-journal-six": {
+    "title": "已接收六条合成消息的本地历史",
+    "steps": [
+      {"name": "进入最新记录，同屏显示第 80 字之后的短尾", "key": "up", "expect": [], "contains": ["First", "six"]},
+      {"name": "查看上一条提问", "key": "up", "expect": [], "contains": ["Record 5"]},
+      {"name": "经过带图消息而不打开图片", "key": "up", "expect": [], "contains": ["Record 4"]},
+      {"name": "越过旧版三条窗口", "key": "up", "expect": [], "contains": ["Record 3"]},
+      {"name": "上一轮回复", "key": "up", "expect": [], "contains": ["Record 2"]},
+      {"name": "第一条提问", "key": "up", "expect": [], "contains": ["Record 1"]},
+      {"name": "本地起点", "key": "up", "expect": [], "contains": ["已到最早记录"]},
+      {"name": "长按下跳到最新", "key": "down", "ms": 850, "expect": [], "contains": ["First"], "capture": true}
+    ]
   }
 }
