@@ -1,6 +1,22 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.2.1-preview.24", "PA-Terminal · 0.2.1-preview.22", "PA-Terminal · 0.2.1-preview.10", "PA-Terminal · 0.2.1-preview.9", "PA-Terminal · 0.2.1-preview.8", "PA-Terminal · 0.2.1-preview.7", "PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.1-preview.25", "PA-Terminal · 0.2.1-preview.24", "PA-Terminal · 0.2.1-preview.22", "PA-Terminal · 0.2.1-preview.10", "PA-Terminal · 0.2.1-preview.9", "PA-Terminal · 0.2.1-preview.8", "PA-Terminal · 0.2.1-preview.7", "PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.1-preview.25"]
+description = "Wi-Fi 断开时，长按 OK 立即尝试连接已保存的网络。已连接时长按 OK 保留原操作。"
+version = "0.2.1-preview.25"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.25/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.25/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.25/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.25/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.25/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.25/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 3013152]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "a4a7e3abccf52674ce0bd7ee711cdb0fd3887ae71d90027a669cacceec47c41f"]
 
 ["PA-Terminal · 0.2.1-preview.24"]
 description = "改善弱网录音与播报连续性。扩展播放缓冲和三处音频对账需要配套 PA。真机弱网播放待验收。"
