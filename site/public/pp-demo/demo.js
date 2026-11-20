@@ -21,6 +21,7 @@ $('scenario-picker').innerHTML = Object.values(model.catalog).map(scene =>
   `<option value="${escape(scene.id)}">${escape(scene.title)}</option>`).join('');
 let pressed = false, pressStarted = 0, holdTimer = null, clickTimer = null, wakeGuard = false, stoppedOnPress = false;
 let pressRoute = '', transitionAt = -Infinity;
+let wifiHold = false, wifiHoldConsumed = false;
 let recordInterval = null, feedbackTimer = null;
 let secondTap = false;
 let volumeFeedbackUntil = 0, volumeSaveTimer = null;
@@ -77,6 +78,12 @@ function startWifiCycle() {
     }, 850);
   };
   if (networks.length) attempt(1, 0);
+}
+function holdWifi() {
+  if (!pressed || !wifiHold || wifiHoldConsumed || pressRoute !== model.view) return;
+  wifiHoldConsumed = true;
+  if (model.wifi.connected || ['wifi-trying', 'wifi-connecting', 'hotspot'].includes(provisioning.stage)) return;
+  startWifiCycle();
 }
 function startHotspot() {
   wifiCycleVersion++;
@@ -468,8 +475,19 @@ function pressOK() {
   const now = performance.now();
   if (pressed || (!model.sleeping && now - transitionAt <= interaction.doubleMs)) return;
   pressRoute = model.view;
+  wifiHold = wifiHoldConsumed = false;
   pressed = true; pressStarted = now; $('key-ok').classList.add('pressed');
   if (model.sleeping) { model.wake(); wakeGuard = true; render(); return; }
+  wifiHold = !model.wifi.connected && provisioning.savedWifi && provisioning.stage !== 'hotspot' &&
+    model.view !== 'device-reset' && model.input !== 'review';
+  if (wifiHold) {
+    if (model.view === 'home' && !setupHome()) {
+      secondTap = Boolean(clickTimer);
+      clearTimeout(clickTimer); clickTimer = null;
+    }
+    holdTimer = later(holdWifi, interaction.holdMs);
+    return;
+  }
   if (setupHome() || model.input === 'review') return;
   if (model.view === 'history') {
     const version = historyView.version;
@@ -509,8 +527,10 @@ function finishAtLimit() {
 }
 function releaseOK() {
   if (!pressed) return;
+  if (performance.now() - pressStarted >= interaction.holdMs) holdWifi();
   pressed = false; $('key-ok').classList.remove('pressed'); clearTimeout(holdTimer);
   if (wakeGuard) { wakeGuard = false; return; }
+  if (wifiHoldConsumed) return;
   if (pressRoute !== model.view && model.input !== 'recording') return;
   const before = model.view;
   finishOK();

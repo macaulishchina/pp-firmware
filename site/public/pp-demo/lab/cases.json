@@ -37,6 +37,13 @@
     "expected": "重试连接不会解除撤销；确认重新配对保留 Wi-Fi 和设置，绑定后进入新会话。进入设置时收到配对结果不会跳走。"
   },
   {
+    "id": "wifi-retry-shortcut",
+    "title": "长按 OK 立即重连 Wi-Fi",
+    "panel": "debug",
+    "steps": "设备已保存 Wi-Fi。关闭热点等一轮连接结束，再打开热点并长按 OK。尝试期间再长按一次。",
+    "expected": "立即开始下一轮，Wi-Fi 图标显示搜寻动画。正在搜寻时重复长按不重新开始，松手不打开菜单或录音。"
+  },
+  {
     "id": "pair-reconnect",
     "title": "配对、重连与离线历史",
     "panel": "setup",
