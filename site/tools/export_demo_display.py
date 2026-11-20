@@ -86,6 +86,7 @@ def export(project, destination):
         lvgl / "src/font/lv_font_montserrat_14.c", destination, "font-symbols",
         {*map(ord, "-0123456789"), 0xF00B, 0xF026, 0xF027, 0xF028, 0xF1EB, 0xF8A2},
     )
+    fonts["battery"] = font_atlas(main / "fonts/terminal_battery_12.c", destination, "font-battery")
     (destination / "fonts.json").write_text(json.dumps(fonts, separators=(",", ":")) + "\n")
     images = json.loads((main / "assets/avatar.json").read_text())["images"]
     for name, metadata in images.items():

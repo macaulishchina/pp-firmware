@@ -1,6 +1,22 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.2.1-preview.25", "PA-Terminal · 0.2.1-preview.24", "PA-Terminal · 0.2.1-preview.22", "PA-Terminal · 0.2.1-preview.10", "PA-Terminal · 0.2.1-preview.9", "PA-Terminal · 0.2.1-preview.8", "PA-Terminal · 0.2.1-preview.7", "PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.1-preview.26", "PA-Terminal · 0.2.1-preview.25", "PA-Terminal · 0.2.1-preview.24", "PA-Terminal · 0.2.1-preview.22", "PA-Terminal · 0.2.1-preview.10", "PA-Terminal · 0.2.1-preview.9", "PA-Terminal · 0.2.1-preview.8", "PA-Terminal · 0.2.1-preview.7", "PA-Terminal · 0.2.1-preview.6", "PA-Terminal · 0.2.1-preview.5", "PA-Terminal · 0.2.1-preview.3", "PA-Terminal · 0.2.1-preview.2", "PA-Terminal · 0.2.1-preview.1", "PA-Terminal · 0.2.0", "PA-Terminal · 0.1.1", "PA-Terminal · 0.1.0", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.1-preview.26"]
+description = "双列操作菜单，默认选中任务消息。新增本机亮度调节，电池数字缩小并增加上下留白。"
+version = "0.2.1-preview.26"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.1-preview.26/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.1-preview.26/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.1-preview.26/README.md"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.1-preview.26/bootloader.bin", "/firmware/pa-terminal/0.2.1-preview.26/partition-table.bin", "/firmware/pa-terminal/0.2.1-preview.26/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 3015408]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "9f5cf68999808a6135f4751f7a85b61a92b2d1ab8445892a1747efa62c8c5ce3", "e9f3278239ab5b963da95a72b653bf58029f99d24a9d55526e8cb6570f0b3f98"]
 
 ["PA-Terminal · 0.2.1-preview.25"]
 description = "Wi-Fi 断开时，长按 OK 立即尝试连接已保存的网络。已连接时长按 OK 保留原操作。"

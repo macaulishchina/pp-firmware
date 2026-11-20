@@ -1,5 +1,7 @@
+import { PP_PROFILE } from './profile.js';
+
 /** The three keys share one ADC. A gesture owns it until release or cancellation. */
-export function bindHardwareKeys({ ok, up, down, press, release, abort, move, home }) {
+export function bindHardwareKeys({ ok, up, down, press, release, abort, move, home, canJumpLatest, latest }) {
   const subscriptions = [];
   const on = (target, event, handler) => {
     target.addEventListener(event, handler);
@@ -12,12 +14,13 @@ export function bindHardwareKeys({ ok, up, down, press, release, abort, move, ho
     const gesture = { key, source, consumed: false, timer: null };
     active = gesture;
     if (key === ok) press();
-    else if (key === up && allowHold) {
+    else if (allowHold && (key === up || canJumpLatest())) {
       gesture.timer = setTimeout(() => {
         if (active !== gesture) return;
         gesture.consumed = true;
-        home?.();
-      }, 650);
+        if (key === up) home();
+        else if (canJumpLatest()) latest();
+      }, PP_PROFILE.interaction.arrowHoldMs);
     }
   }
 

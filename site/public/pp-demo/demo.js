@@ -21,18 +21,21 @@ $('scenario-picker').innerHTML = Object.values(model.catalog).map(scene =>
   `<option value="${escape(scene.id)}">${escape(scene.title)}</option>`).join('');
 let pressed = false, pressStarted = 0, holdTimer = null, clickTimer = null, wakeGuard = false, stoppedOnPress = false;
 let pressRoute = '', transitionAt = -Infinity;
+let pressMenuChoice = '';
 let wifiHold = false, wifiHoldConsumed = false;
 let recordInterval = null, feedbackTimer = null;
 let secondTap = false;
 let volumeFeedbackUntil = 0, volumeSaveTimer = null;
+let brightnessDraft = model.brightness;
 let followResponse = true;
 let pendingNotice = null;
 let wifiDraft = provisioning.config.networks.map(network => ({ ...network }));
 let appliedWifiNetworks = wifiDraft.map(network => ({ ...network }));
 let wifiCycleVersion = 0;
-let wifiAttempt = null;
+let wifiRetryTimer = null;
+let retryWifiBatch = null;
+let paAvailable = true;
 let appliedConfig = { ...provisioning.config };
-let wifiAttempts = [];
 function renderWifiDraft() {
   $('cloud-networks').innerHTML = wifiDraft.map((network, index) => `<div class="wifi-profile" data-index="${index}">
     <div class="wifi-profile-heading"><strong>${index + 1}</strong><span>连接优先级 ${index + 1}</span><div><button type="button" data-wifi-action="up" aria-label="上移网络" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" data-wifi-action="down" aria-label="下移网络" ${index === wifiDraft.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-wifi-action="remove" ${wifiDraft.length === 1 ? 'disabled' : ''}>移除</button></div></div>
@@ -41,52 +44,80 @@ function renderWifiDraft() {
   </div>`).join('');
   $('wifi-add').disabled = wifiDraft.length >= 5;
 }
+function cancelWifiCycle() {
+  clearTimeout(wifiRetryTimer);
+  retryWifiBatch = null;
+  return ++wifiCycleVersion;
+}
 function startWifiCycle() {
-  const version = ++wifiCycleVersion;
+  if (model.sleeping) return;
+  const version = cancelWifiCycle();
   const networks = appliedWifiNetworks.map(network => ({ ...network }));
-  model.stopPlayback(); model.feedback = ''; provisioning.stage = 'wifi-trying'; provisioning.message = '';
-  model.setWifi({ connected: false }); model.network(false);
-  wifiAttempts = [];
-  const attempt = (round, index) => {
-    if (version !== wifiCycleVersion) return;
-    const network = networks[index];
-    wifiAttempt = { round, index, total: networks.length, ssid: network.ssid };
-    const entry = { round, index, ssid: network.ssid, status: '连接中' };
-    wifiAttempts.push(entry); render();
-    later(() => {
-      if (version !== wifiCycleVersion) return;
-      if (network.available) {
-        entry.status = '已连接';
-        model.setWifi({ connected: true, ssid: network.ssid });
-        model.network(!provisioning.rejected && (provisioning.paired || !$('setup-fail').checked));
-        if (provisioning.rejected) provisioning.stage = 'revoked';
-        else if (!provisioning.paired && $('setup-fail').checked) provisioning.stage = 'unreachable';
-        else if (!provisioning.paired) provisioning.issueCode();
-        else provisioning.stage = 'ready';
-        provisioning.message = `已连接 ${network.ssid}，停止后续尝试`;
-        model.log(`Wi-Fi 第 ${round}/3 轮第 ${index + 1} 个网络连接成功，本轮结束`);
-        render(); return;
-      }
-      entry.status = '失败';
-      model.log(`Wi-Fi 第 ${round}/3 轮第 ${index + 1} 个网络失败，按顺序继续`);
-      if (index + 1 < networks.length) attempt(round, index + 1);
-      else if (round < 3) attempt(round + 1, 0);
-      else {
-        provisioning.stage = 'wifi-exhausted'; provisioning.message = '已尝试 3 轮，可从设备维护重试连接或重新配网';
+  if (!networks.length) return;
+  model.stopPlayback(); model.feedback = ''; provisioning.message = '';
+  model.setWifi({ connected: false });
+  let nextIndex = 0;
+  const batch = () => {
+    if (version !== wifiCycleVersion || model.sleeping) return;
+    retryWifiBatch = null;
+    const started = performance.now();
+    provisioning.stage = 'wifi-trying';
+    render();
+    const attempt = tried => {
+      const network = networks[nextIndex];
+      nextIndex = (nextIndex + 1) % networks.length;
+      wifiRetryTimer = later(() => {
+        if (version !== wifiCycleVersion || model.sleeping) return;
+        if (network.available) {
+          model.setWifi({ connected: true, ssid: network.ssid });
+          model.network(paAvailable && !provisioning.rejected && (provisioning.paired || !$('setup-fail').checked));
+          model.clockSynced = true;
+          if (provisioning.rejected) provisioning.stage = 'revoked';
+          else if (!model.online) provisioning.stage = 'unreachable';
+          else if (!provisioning.paired) provisioning.issueCode();
+          else provisioning.stage = 'ready';
+          render();
+          return;
+        }
+        if (tried < PP_PROFILE.wifi.attempts) {
+          attempt(tried + 1);
+          return;
+        }
+        provisioning.stage = 'wifi-waiting';
+        retryWifiBatch = batch;
         render();
-      }
-    }, 850);
+        wifiRetryTimer = later(batch, Math.max(0, started + PP_PROFILE.wifi.retryMs - performance.now()));
+      }, PP_PROFILE.wifi.attemptMs);
+    };
+    attempt(1);
   };
-  if (networks.length) attempt(1, 0);
+  batch();
 }
 function holdWifi() {
   if (!pressed || !wifiHold || wifiHoldConsumed || pressRoute !== model.view) return;
   wifiHoldConsumed = true;
-  if (model.wifi.connected || ['wifi-trying', 'wifi-connecting', 'hotspot'].includes(provisioning.stage)) return;
-  startWifiCycle();
+  if (model.wifi.connected || provisioning.stage === 'wifi-trying' || provisioning.stage === 'hotspot') return;
+  if (retryWifiBatch) {
+    clearTimeout(wifiRetryTimer);
+    retryWifiBatch();
+  } else startWifiCycle();
+}
+function sleepDevice() {
+  cancelWifiCycle();
+  model.sleep();
+  render();
+}
+function wakeDevice() {
+  model.wake();
+  if (!model.wifi.connected && provisioning.savedWifi && provisioning.stage !== 'hotspot') {
+    startWifiCycle();
+    return;
+  }
+  if (model.wifi.connected) model.network(paAvailable && provisioning.paired && !provisioning.rejected);
+  render();
 }
 function startHotspot() {
-  wifiCycleVersion++;
+  cancelWifiCycle();
   cancelPress('进入配网，未提交录音已丢弃');
   leaveHistory(); model.selectScenario(model.scenario);
   provisioning.hotspot(); model.setWifi({ connected: false }); model.network(false);
@@ -96,10 +127,10 @@ function startHotspot() {
   render();
 }
 function requestConfigReload() {
-  if (provisioning.stage === 'wifi-trying') { provisioning.message = '正在按顺序连接网络，请稍候'; render(); return; }
   if (!provisioning.paired) { provisioning.message = '请先完成设备配对'; render(); return; }
   if (!model.online) { provisioning.message = '设备离线，保留本地配置；联网后同步'; render(); return; }
-  if (model.input !== 'idle' || model.playing || ['processing', 'responding'].includes(model.work)) {
+  if (model.input !== 'idle' || model.playing || model.view === 'brightness' ||
+      ['processing', 'responding'].includes(model.work)) {
     provisioning.reloadPending = true;
     provisioning.sync = '等待本次交互结束后重载'; render(); return;
   }
@@ -138,9 +169,8 @@ function renderProvisioning() {
   $('scenario-picker').disabled = !provisioning.paired;
   $('setup-ready').hidden = provisioning.paired;
   const status = !setupHome() ? `${provisioning.name} · ${provisioning.sync}`
-    : { hotspot: '等待手机配置初始 Wi-Fi', 'wifi-connecting': '正在连接 Wi-Fi 与 PA…', pairing: '等待在 PA 后台输入屏幕上的 8 位码', unreachable: 'Wi-Fi 已连接，PA 暂不可达', revoked: 'PA 拒绝当前身份，可在设备维护中重新配对', 'wifi-trying': '正在重试连接', 'wifi-exhausted': 'Wi-Fi 连接失败' }[provisioning.stage];
-  $('setup-state').textContent = `${status}${provisioning.message ? ` · ${provisioning.message}` : ''}`;
-  $('wifi-attempts').innerHTML = wifiAttempts.map(entry => `<li>第 ${entry.round}/3 轮 · ${entry.index + 1}. ${escape(entry.ssid)} · ${entry.status}</li>`).join('');
+    : { hotspot: '等待手机配置初始 Wi-Fi', pairing: '等待在 PA 后台输入屏幕上的 8 位码', unreachable: 'Wi-Fi 已连接，PA 暂不可达', revoked: 'PA 拒绝当前身份，可在「PA 与维护」中更换配对' }[provisioning.stage];
+  $('setup-state').textContent = [status, provisioning.message].filter(Boolean).join(' · ');
 }
 const historyView = { id: null, record: null, page: 0, loading: false, error: '', source: '', version: 0 };
 function historyPages(record) {
@@ -152,16 +182,18 @@ function leaveHistory() {
   historyView.loading = false; historyView.record = null; historyView.error = '';
   model.view = 'home';
 }
-function openHistoryRecord(id, position = 'last') {
+function openHistoryRecord(id, position = 'last', { stopPlayback = true } = {}) {
   if (!id) { feedback('已到最早记录'); return; }
   const version = ++historyView.version;
   Object.assign(historyView, { id, record: null, page: 0, error: '', loading: false, source: '' });
-  model.stopPlayback(); model.feedback = ''; model.homeOnly = false; model.view = 'history';
+  if (stopPlayback) model.stopPlayback();
+  model.feedback = ''; model.homeOnly = false; model.view = 'history';
   const show = (record, source) => {
     historyView.record = record; historyView.source = source;
     const parts = historyPages(record);
+    const replyPage = parts.findIndex(part => part.role === '回复');
     historyView.page = position === 'last' ? parts.length - 1 : position === 'input'
-      ? Math.max(0, parts.findIndex(part => part.role === '回复') - 1) : 0;
+      ? Math.max(0, replyPage - 1) : position === 'reply' ? Math.max(0, replyPage) : 0;
     render();
   };
   const cached = model.history.cached(id);
@@ -220,9 +252,26 @@ function browseHistory(direction) {
   }
   openHistoryRecord(nextId, direction < 0 ? 'last' : 'first');
 }
+function canJumpLatest() {
+  return !model.sleeping && model.input === 'idle' && (model.view === 'history'
+    || model.view === 'home' && !model.homeOnly && !setupHome() && model.work !== 'clarifying'
+      && Boolean(model.reply || model.work === 'responding'));
+}
+function jumpLatest() {
+  model.newReply = false;
+  if (model.online && model.view === 'home' && model.work === 'responding') {
+    followResponse = true;
+    model.page = 0;
+    render();
+    return;
+  }
+  const id = model.online ? model.history.latestId : model.history.latestCachedId;
+  if (id) openHistoryRecord(id, 'reply', { stopPlayback: false });
+  else feedback(model.history.enabled ? '最近记录尚未缓存，请联网同步' : '离线缓存已关闭');
+}
 function later(fn, delay) { return setTimeout(fn, delay); }
 function savePreferences() {
-  try { localStorage.setItem('pp-demo.preferences.v1', JSON.stringify({ mode:model.mode, volume:model.volume, keepOnline:model.keepOnline })); } catch {}
+  try { localStorage.setItem('pp-demo.preferences.v1', JSON.stringify({ mode:model.mode, volume:model.volume, brightness:model.brightness, keepOnline:model.keepOnline, standbyWifi:model.standbyWifi })); } catch {}
 }
 function adjustVolume(delta, showToast = false) {
   model.volume = Math.max(0, Math.min(100, model.volume + delta));
@@ -245,7 +294,7 @@ function setupHome() {
 function screenPhase() {
   if (model.sleeping || model.view !== 'home') return model.phase;
   if (setupHome()) return provisioning.stage;
-  if (model.view === 'home' && ['wifi-trying', 'wifi-exhausted'].includes(provisioning.stage)) return provisioning.stage;
+  if (['wifi-trying', 'wifi-waiting'].includes(provisioning.stage)) return provisioning.stage;
   return model.phase;
 }
 function networkPages() {
@@ -255,15 +304,17 @@ function networkPages() {
 }
 
 function renderScreen(phase = screenPhase()) {
+  model.syncMenuExecution();
   const volume = model.volume;
   const frame = {
     view: 'idle', origin: '', body: '', state: '就绪', hint: '按住说 · OK菜单',
     clock: model.clockSynced ? clockFormat.format(new Date()) : '--:--',
-    battery: Number.isFinite(model.batteryLevel) ? String(model.batteryLevel) : '--',
+    battery: model.batteryLevel,
     rssi: model.wifi.connected ? model.wifi.rssi ?? -127 : -127,
+    wifiSearching: !model.sleeping && provisioning.stage === 'wifi-trying',
     queue: model.mode === 'queue', volume, brightness: model.brightness, textSize: model.textSize,
   };
-  const info = (origin, body = '', hint = 'OK 设置') => {
+  const info = (origin, body = '', hint = 'OK 菜单') => {
     Object.assign(frame, { view: 'info', origin, body, hint, state: origin });
   };
   const menu = (origin, choices, selection, state = '请选择') => {
@@ -279,28 +330,24 @@ function renderScreen(phase = screenPhase()) {
     case 'pairing':
       info('等待配对', Date.now() < provisioning.expires
         ? `${provisioning.code}\n\n在 PA 后台输入这八位数字\n配对码十分钟有效`
-        : '配对码已过期，请重新连接。', 'OK 设置');
-      break;
-    case 'wifi-connecting':
-      info('正在连接 Wi-Fi', model.wifi.ssid, 'OK 设置');
+        : '配对码已过期，请重新连接。', 'OK 菜单');
       break;
     case 'wifi-trying':
-      frame.state = `连接 Wi-Fi ${wifiAttempt.index + 1}/${wifiAttempt.total} · 第 ${wifiAttempt.round}/3 轮`;
-      break;
-    case 'wifi-exhausted':
-      frame.state = 'Wi-Fi 三轮连接失败，请在菜单重试或重新配网';
+    case 'wifi-waiting':
+      frame.state = '';
+      if (setupHome()) frame.hint = 'OK 菜单';
       break;
     case 'revoked':
-      info('PA 身份验证失败 (401)', '请检查 PA 接入设置。配对已被撤销时，可在设备维护中重新配对，保留 Wi-Fi。', '下 重新配对 · OK 设置');
+      info('PA 身份验证失败 (401)', '请检查 PA 接入设置。旧配对被撤销后，可更换配对并保留 Wi-Fi。', '下 更换配对 · OK 菜单');
       break;
     case 'unreachable':
-      info('PA 暂不可达，稍后重连', '', 'OK 设置');
+      info('PA 暂不可达，稍后重连', '', 'OK 菜单');
       break;
     case 'offline':
       if (!model.homeOnly && model.reply && model.history.enabled) {
         reply(model.pages[model.page] || '');
       }
-      frame.state = model.wifi.connected ? 'PA 暂不可达，稍后重连' : '连接断开，正在重连';
+      frame.state = model.wifi.connected ? 'PA 暂不可达，稍后重连' : '';
       break;
     case 'recording':
     case 'finalizing':
@@ -308,7 +355,7 @@ function renderScreen(phase = screenPhase()) {
       Object.assign(frame, {
         view: 'input', origin: '你说的',
         body: phase === 'processing' ? model.submittedPrompt : model.partialPrompt,
-        state: phase === 'finalizing' ? '识别中' : phase === 'processing' ? '处理中' : '正在听',
+        state: phase === 'finalizing' ? '识别中' : phase === 'processing' ? '等待回复' : '正在听',
         hint: phase === 'recording' ? '正在听 · 松开结束' : '上下翻页 · 长↑主页',
         elapsed: phase === 'recording' ? model.elapsed : 0,
         signal: phase === 'recording' ? demoVoiceLevel(model.elapsed) : 0,
@@ -329,20 +376,30 @@ function renderScreen(phase = screenPhase()) {
     case 'playing':
     case 'reply':
       reply(phase === 'responding' && followResponse ? Array.from(model.responseVisible).slice(-160).join('') : model.pages[model.page] || '');
+      frame.hint = '上下翻页 · 长↓最新';
       frame.follow = phase === 'responding' && followResponse;
       if (model.pageImage) Object.assign(frame, { view: 'image', origin: '图片', image: model.pageImage });
       if (model.playing) Object.assign(frame, { state: '播放中', hint: '上下音量 · OK停播' });
       break;
     case 'menu':
-    case 'settings':
+    case 'sound':
+    case 'connectivity':
+    case 'power':
     case 'maintenance':
-      menu({ menu: '操作菜单', settings: '设置', maintenance: '设备维护' }[phase],
-        model.menus.map(item => item.id === 'keep' ? `${item.label} · ${item.value}` : item.label),
-        model.menuIndex, { menu: '请选择', settings: '选择设置', maintenance: '维护操作' }[phase]);
+      menu({ menu: '操作菜单', sound: '声音与屏幕', connectivity: '网络与配对',
+        power: '电源与待机', maintenance: 'PA 与维护' }[phase],
+        model.menus.map(item => item.value ? `${item.label} · ${item.value}` : item.label),
+        model.menuIndex, phase === 'menu' ? '请选择' : '');
+      frame.menuDetail = model.menus[model.menuIndex]?.detail;
+      frame.menuGrid = phase === 'menu';
       break;
     case 'volume':
       info('音量', '', '上下音量 · OK返回');
       frame.volumeFeedback = true;
+      break;
+    case 'brightness':
+      Object.assign(frame, { view: 'brightness', origin: '屏幕亮度', body: `${brightnessDraft}%`,
+        brightness: brightnessDraft, state: '', hint: '上下调整 · OK 保存' });
       break;
     case 'notices':
       menu('任务消息', [...model.notices.map(notice => notice.title), '返回菜单'],
@@ -359,9 +416,9 @@ function renderScreen(phase = screenPhase()) {
         ? historyView.source === '本地缓存' ? '本地缓存' : '历史记录'
         : historyView.loading ? '正在读取' : historyView.error;
       if (part) {
-        reply(part.text, part.role, status, 'OK 返回 · 长↑主页');
+        reply(part.text, part.role, status, '上下翻页 · 长↓最新');
         if (part.image) Object.assign(frame, { view: 'image', origin: '图片', image: part.image });
-      } else Object.assign(frame, { state: status, hint: 'OK 返回 · 长↑主页' });
+      } else Object.assign(frame, { state: status, hint: '上下翻页 · 长↓最新' });
       break;
     }
     case 'status': {
@@ -373,7 +430,7 @@ function renderScreen(phase = screenPhase()) {
       break;
     }
     case 'device-reset':
-      info(provisioning.resetTarget === 'factory' ? '恢复出厂？' : provisioning.resetTarget === 'repair' ? '重新配对？' : '重新配网？',
+      info(provisioning.resetTarget === 'factory' ? '恢复出厂设置？' : provisioning.resetTarget === 'repair' ? '更换 PA 配对？' : '设置 Wi-Fi？',
         provisioning.resetTarget === 'factory'
           ? '将移除此设备的配对、Wi-Fi 和本地设置。服务器会话和任务不会被删除。'
           : provisioning.resetTarget === 'repair' ? '将更换设备身份并重启。保留 Wi-Fi 和设置。请在 PA 后台用新码绑定新会话。' : '将开启设备热点。提交前保留原配置。',
@@ -390,15 +447,18 @@ function renderScreen(phase = screenPhase()) {
       else if (model.work === 'processing' || model.work === 'responding') frame.state = '后台处理中';
   }
   if (model.feedback && phase !== 'sleeping') frame.state = model.feedback;
+  frame.awaitingReply = phase === 'processing' && !model.feedback;
   if (model.playing) frame.volumeFeedback ||= performance.now() < volumeFeedbackUntil;
   hardware.screen.dataset.phase = phase;
   hardware.screen.dataset.view = frame.view;
   hardware.screen.dataset.mode = model.mode;
   hardware.screen.dataset.playing = String(model.playing);
   hardware.screen.dataset.volumeFeedback = String(Boolean(frame.volumeFeedback));
+  hardware.screen.dataset.menuLayout = frame.menuGrid ? 'grid' : frame.view === 'menu' ? 'list' : '';
+  hardware.screen.dataset.selected = frame.choices?.[frame.selection] || '';
   if (frame.origin && frame.state === frame.origin) frame.state = '';
   hardware.content.textContent = [frame.origin, frame.body, frame.choices?.join('\n'),
-    frame.image?.alt, frame.volumeFeedback ? `音量 ${volume}` : frame.state, frame.hint].filter(Boolean).join('\n');
+    frame.menuDetail, frame.image?.alt, frame.volumeFeedback ? `音量 ${volume}` : frame.state, frame.hint].filter(Boolean).join('\n');
   display.render(frame);
 }
 
@@ -408,13 +468,14 @@ function render() {
   $('stage-status').textContent = {
     idle: '就绪', recording: '正在收音', finalizing: '等待最终转写', processing: '处理中',
     responding: '接收回复', playing: '模拟播放', reply: '回复已收到', clarifying: '等待回答',
-    menu: '操作菜单', settings: '设置', maintenance: '设备维护', volume: '调整音量', notices: '任务消息',
+    menu: '操作菜单', sound: '声音与屏幕', connectivity: '网络与配对', power: '电源与待机',
+    maintenance: 'PA 与维护', volume: '调整音量', brightness: '调整亮度', notices: '任务消息',
     notice: '查看任务报告', history: '查看历史', status: '网络状态', 'device-reset': '等待确认',
-    error: '请求未完成', offline: 'PA 离线', sleeping: '设备休眠', hotspot: '等待手机配网',
-    revoked: '配对被拒绝', pairing: '等待 PA 配对', 'wifi-connecting': '连接 Wi-Fi', 'wifi-trying': '按顺序重连',
-    'wifi-exhausted': 'Wi-Fi 重试结束', unreachable: 'PA 暂不可达',
+    error: '请求未完成', offline: model.wifi.connected ? 'PA 离线' : '', sleeping: '设备休眠', hotspot: '等待手机配网',
+    revoked: '配对被拒绝', pairing: '等待 PA 配对', 'wifi-trying': '',
+    'wifi-waiting': '', unreachable: 'PA 暂不可达',
     'input-review': '转写待确认', 'input-review-text': '查看待发送转写',
-  }[phase] || '就绪';
+  }[phase] ?? '就绪';
   $('stage-dot').className = phase === 'error' ? 'error' : !model.online ? 'offline' : '';
   $('utterance').textContent = model.prompt;
   $('scene-description').textContent = model.catalog[model.scenario].description;
@@ -475,9 +536,11 @@ function pressOK() {
   const now = performance.now();
   if (pressed || (!model.sleeping && now - transitionAt <= interaction.doubleMs)) return;
   pressRoute = model.view;
+  model.syncMenuExecution();
+  pressMenuChoice = model.menuOpen ? model.menus[model.menuIndex].id : '';
   wifiHold = wifiHoldConsumed = false;
   pressed = true; pressStarted = now; $('key-ok').classList.add('pressed');
-  if (model.sleeping) { model.wake(); wakeGuard = true; render(); return; }
+  if (model.sleeping) { wakeGuard = true; wakeDevice(); return; }
   wifiHold = !model.wifi.connected && provisioning.savedWifi && provisioning.stage !== 'hotspot' &&
     model.view !== 'device-reset' && model.input !== 'review';
   if (wifiHold) {
@@ -532,14 +595,14 @@ function releaseOK() {
   if (wakeGuard) { wakeGuard = false; return; }
   if (wifiHoldConsumed) return;
   if (pressRoute !== model.view && model.input !== 'recording') return;
+  if (pressMenuChoice && model.menus[model.menuIndex]?.id !== pressMenuChoice) return;
   const before = model.view;
   finishOK();
   if (model.view !== before) transitionAt = performance.now();
 }
 function finishOK() {
   if (setupHome() && model.view === 'home') {
-    provisioning.settingsParent = 'home';
-    model.openView('settings');
+    model.openView('menu');
     render(); return;
   }
   if (model.input === 'review') {
@@ -587,7 +650,7 @@ function cancelPress(reason) {
 function move(direction) {
   transitionAt = -Infinity;
   if (model.view === 'device-reset') { model.menuIndex = 1 - model.menuIndex; render(); return; }
-  if (model.sleeping) { model.wake(); render(); return; }
+  if (model.sleeping) { wakeDevice(); return; }
   if (model.input === 'review') {
     if (model.view === 'input-review-text') model.page = Math.max(0, Math.min(model.reviewPages.length - 1, model.page + direction));
     else model.menuIndex = (model.menuIndex + direction + 3) % 3;
@@ -599,9 +662,10 @@ function move(direction) {
   }
   if (model.input !== 'idle') { feedback('先结束或确认当前输入'); return; }
   if (model.playing && model.view === 'home') { adjustVolume(direction * -5, true); return; }
-  if (['menu', 'settings', 'maintenance'].includes(model.view)) model.menuIndex = (model.menuIndex + direction + model.menus.length) % model.menus.length;
+  if (model.menuOpen) model.menuIndex = (model.menuIndex + direction + model.menus.length) % model.menus.length;
   else if (model.view === 'history') { browseHistory(direction); return; }
   else if (model.view === 'volume') adjustVolume(direction * -5);
+  else if (model.view === 'brightness') brightnessDraft = Math.max(40, Math.min(100, brightnessDraft - direction * 5));
   else if (model.view === 'status') model.page = Math.max(0, Math.min(networkPages().length - 1, model.page + direction));
   else if (model.view === 'notices') {
     pendingNotice = null;
@@ -619,7 +683,7 @@ function move(direction) {
 }
 function returnHome() {
   transitionAt = -Infinity;
-  if (model.sleeping) { model.wake(); render(); return; }
+  if (model.sleeping) { wakeDevice(); return; }
   pendingNotice = null;
   cancelPress('返回主页，未发送输入已丢弃');
   leaveHistory(); model.home(); render();
@@ -633,18 +697,18 @@ function openConfirmation(action) {
 }
 function menuOK() {
   model.feedback = '';
-  if (['menu', 'settings', 'maintenance'].includes(model.view)) {
+  if (model.menuOpen) {
     const id = model.menus[model.menuIndex].id;
     if (id === 'cancel') {
-      if (!['processing', 'responding'].includes(model.work)) { feedback('没有当前执行'); return; }
+      if (!model.canCancelExecution) { feedback('没有当前执行'); return; }
       model.workVersion++; model.work = 'idle'; model.stopPlayback();
       feedback('已请求取消');
       later(() => feedback('已收到取消结果'), 350); return;
     } else if (id === 'home') { returnHome(); return; }
-    else if (id === 'back') model.openView(model.view === 'maintenance' ? 'settings' : provisioning.settingsParent || 'menu', true);
-    else if (id === 'settings') { provisioning.settingsParent = 'menu'; model.openView('settings'); }
+    else if (id === 'back') model.openView(
+      model.view === 'maintenance' ? 'connectivity' : 'menu', true);
     else if (id === 'reload') {
-      feedback(model.online ? '正在获取配置' : '离线，联网后才能重载');
+      feedback(model.online ? '正在获取配置' : '请先连上 PA 再同步');
       requestConfigReload(); return;
     }
     else if (id === 'retry') {
@@ -653,16 +717,24 @@ function menuOK() {
       model.view = 'home'; startWifiCycle(); return;
     }
     else if (['reconfigure', 'repair', 'factory'].includes(id)) {
-      if (id === 'repair' && !provisioning.rejected) { feedback('仅在 PA 拒绝身份后重新配对'); return; }
+      if (id === 'repair' && !provisioning.rejected) { feedback('仅在配对被拒后可用'); return; }
       if (id === 'reconfigure' && provisioning.stage === 'hotspot') { returnHome(); return; }
       openConfirmation(id); return;
     }
-    else if (id === 'keep') { model.keepOnline = !model.keepOnline; savePreferences(); feedback(model.keepOnline ? '已保持在线' : '空闲后自动休眠'); return; }
+    else if (id === 'keep') { model.keepOnline = !model.keepOnline; savePreferences(); feedback(model.keepOnline ? '自动休眠已关闭' : '空闲后自动休眠'); return; }
+    else if (id === 'standby-wifi') {
+      model.standbyWifi = !model.standbyWifi; savePreferences();
+      feedback(model.standbyWifi ? '熄屏后保持 Wi-Fi' : '熄屏后关 Wi-Fi'); return;
+    }
     else if (id === 'sleep') {
       if (!model.canSleep) { feedback('当前交互未结束，暂不休眠'); return; }
-      model.sleep();
+      sleepDevice(); return;
     }
-    else { model.openView(id); if (id === 'notices') model.noticeIndex = 0; }
+    else {
+      if (id === 'brightness') brightnessDraft = model.brightness;
+      model.openView(id);
+      if (id === 'notices') model.noticeIndex = 0;
+    }
   } else if (model.view === 'device-reset') {
     if (model.menuIndex === 1) {
       if (provisioning.resetTarget === 'repair') {
@@ -674,6 +746,7 @@ function menuOK() {
       if (provisioning.resetTarget === 'factory') {
         provisioning.paired = provisioning.rejected = provisioning.savedWifi = false;
         model.history.clearCache(); model.volume = 45; model.mode = 'steer'; model.keepOnline = false;
+        model.standbyWifi = true;
         model.autoSpeak = true; model.speechLimit = 200; model.sleepSeconds = 120; model.voiceRate = 1;
         model.textSize = 16; model.brightness = 65;
         savePreferences();
@@ -681,6 +754,12 @@ function menuOK() {
       startHotspot(); return;
     }
     model.view = provisioning.returnView; model.menuIndex = provisioning.returnIndex;
+  } else if (model.view === 'brightness') {
+    model.brightness = brightnessDraft;
+    savePreferences();
+    model.openView('sound', true);
+    feedback('亮度已保存');
+    return;
   } else if (model.view === 'history') leaveHistory();
   else if (model.view === 'notices') {
     if (model.noticeIndex === model.notices.length) {
@@ -705,10 +784,13 @@ function menuOK() {
     model.noticeIndex = Math.max(0, model.notices.indexOf(model.activeNotice));
     model.view = 'notices';
   }
-  else model.openView(model.view === 'status' ? 'settings' : 'menu', true);
+  else model.openView(model.view === 'status' ? 'connectivity' : 'sound', true);
   render();
 }
-bindHardwareKeys({ ...hardware, press: pressOK, release: releaseOK, abort: cancelPress, move, home: returnHome });
+bindHardwareKeys({
+  ...hardware, press: pressOK, release: releaseOK, abort: cancelPress, move, home: returnHome,
+  canJumpLatest, latest: jumpLatest,
+});
 document.addEventListener('keydown', e => {
   if (e.code === 'Escape' && !e.target.closest('input,select,textarea')) returnHome();
 });
@@ -730,7 +812,7 @@ $('recognition-failure').addEventListener('click', () => { model.failNext = !mod
 $('record-limit').addEventListener('click', finishAtLimit);
 $('setup-first').addEventListener('click', () => { provisioning.paired = provisioning.savedWifi = provisioning.rejected = false; provisioning.message = ''; startHotspot(); });
 $('setup-ready').addEventListener('click', () => {
-  wifiCycleVersion++;
+  cancelWifiCycle();
   cancelPress('恢复已配对演示'); leaveHistory(); model.selectScenario(model.scenario);
   provisioning.version++; provisioning.savedWifi = true; provisioning.rejected = false; provisioning.paired = true; provisioning.stage = 'ready'; provisioning.code = '';
   model.setWifi({ connected: true, ssid: $('setup-ssid').value || 'Home Wi-Fi' }); model.network(true);
@@ -744,23 +826,10 @@ $('setup-wifi').addEventListener('submit', event => {
   if (!ssid || new TextEncoder().encode(ssid).length > 32) {
     provisioning.message = '请填写有效的 Wi-Fi 名称'; render(); return;
   }
-  const version = ++provisioning.version, fail = $('setup-fail').checked;
   provisioning.savedWifi = true; appliedWifiNetworks = [{ ssid, password: '', available: true }];
   provisioning.config.networks = appliedWifiNetworks.map(network => ({ ...network }));
-  provisioning.stage = 'wifi-connecting'; provisioning.message = '';
-  model.setWifi({ connected: false, ssid });
   $('setup-password').value = '';
-  render();
-  later(() => {
-    if (version !== provisioning.version || provisioning.stage !== 'wifi-connecting') return;
-    model.setWifi({ connected: true, ssid }); model.network(!fail);
-    model.clockSynced = true;
-    if (fail) { provisioning.stage = 'unreachable'; provisioning.message = '联网失败模拟；取消勾选后重新配网可恢复'; }
-    else if (provisioning.rejected) provisioning.stage = 'revoked';
-    else if (provisioning.paired) provisioning.stage = 'ready';
-    else { provisioning.issueCode(); model.log('模拟向 PA 申请 8 位一次性配对码，有效期 10 分钟'); }
-    render();
-  }, 1100);
+  startWifiCycle();
 });
 $('setup-pair').addEventListener('submit', event => {
   event.preventDefault();
@@ -786,17 +855,17 @@ $('cloud-form').addEventListener('submit', event => {
     brightness: Number($('cloud-brightness').value), textSize: Number($('cloud-text').value),
     voice: $('cloud-voice').value, voiceRate: Number($('cloud-rate').value),
     offlineHistory: $('cloud-cache').value === 'yes', showImages: $('cloud-images').value === 'yes', networks }, $('setup-name').value.trim() || '我的 PP');
-  provisioning.message = '设备菜单 → 重载配置，或点击下方模拟重载';
+  provisioning.message = '网络与配对 → PA 与维护 → 同步 PA 设置，或点击下方模拟同步';
   render();
 });
 $('cloud-reload').addEventListener('click', requestConfigReload);
 $('setup-revoke').addEventListener('click', () => {
   if (!provisioning.paired) return;
-  wifiCycleVersion++;
+  cancelWifiCycle();
   cancelPress('撤销模拟设备配对'); leaveHistory(); model.selectScenario(model.scenario);
   provisioning.version++; provisioning.stage = 'revoked'; provisioning.rejected = true;
   provisioning.paired = false; provisioning.code = ''; model.network(false);
-  provisioning.message = '旧绑定已撤销，需重新配对';
+  provisioning.message = '旧绑定已撤销，请选择「更换 PA 配对」';
   render();
 });
 $('wifi-add').addEventListener('click', () => {
@@ -845,14 +914,16 @@ $('wifi-strength').addEventListener('change', () => {
   const connected = value !== 'off';
   if (!connected) { cancelPress('Wi-Fi 断开，本次未提交录音已丢弃'); }
   model.setWifi({ connected, rssi: ({strong:-52,medium:-67,weak:-82})[value] ?? model.wifi.rssi });
-  if (connected && !wasConnected) model.network(true);
+  if (connected && !wasConnected && !model.sleeping) model.network(paAvailable);
   render();
 });
 $('battery-level').addEventListener('input', () => { model.batteryLevel = Number($('battery-level').value); render(); });
 $('pa-state').addEventListener('change', () => {
   const online = $('pa-state').value === 'online';
+  paAvailable = online;
   if (!online) cancelPress('PA 连接中断，本次未提交录音已丢弃');
-  model.network(online); render();
+  if (!model.sleeping) model.network(online);
+  render();
 });
 $('clock-synced').addEventListener('change', () => { model.clockSynced = $('clock-synced').checked; render(); });
 $('task-complete').addEventListener('click', () => { model.backgroundComplete(); render(); });
@@ -869,7 +940,8 @@ setInterval(() => {
   const reconnected = model.online && !syncWasOnline;
   syncWasOnline = model.online;
   if (provisioning.paired && reconnected) requestConfigReload();
-  else if (provisioning.paired && provisioning.reloadPending && model.input === 'idle' && !model.playing && !['processing', 'responding'].includes(model.work)) requestConfigReload();
+  else if (provisioning.paired && provisioning.reloadPending && model.view !== 'brightness' &&
+    model.input === 'idle' && !model.playing && !['processing', 'responding'].includes(model.work)) requestConfigReload();
   else if (!provisioning.paired && !provisioning.rejected && provisioning.stage === 'unreachable' && reconnected && !$('setup-fail').checked) { provisioning.issueCode(); provisioning.message = ''; render(); }
   renderScreen();
 }, 250);
@@ -877,7 +949,7 @@ let lastActivity = Date.now();
 ['pointerdown','keydown'].forEach(type => document.addEventListener(type, () => { lastActivity = Date.now(); }));
 setInterval(() => {
   if (!provisioning.paired && provisioning.stage === 'pairing') render();
-  if (provisioning.paired && provisioning.stage === 'ready' && !model.keepOnline && !model.sleeping && !pressed && model.canSleep && Date.now()-lastActivity >= model.sleepSeconds * 1000) { model.sleep(); render(); }
+  if (provisioning.paired && provisioning.stage === 'ready' && !model.keepOnline && !model.sleeping && !pressed && model.canSleep && Date.now()-lastActivity >= model.sleepSeconds * 1000) sleepDevice();
 }, 1000);
 $('cloud-volume').value = String(model.volume);
 $('cloud-mode').value = model.mode;

@@ -47,6 +47,7 @@
             <div><dt>双击 OK</dt><dd>切换引导／排队</dd></div>
             <div><dt>上／下</dt><dd>翻页或选择，播报时调音量</dd></div>
             <div><dt>长按上</dt><dd>返回形象主页</dd></div>
+            <div><dt>长按下</dt><dd>聊天中跳到最新消息</dd></div>
           </dl>
         </section>
         <section id="panel-setup" class="panel-body" hidden>
@@ -84,12 +85,12 @@
               <label>显示图片<select id="cloud-images"><option value="yes">开启</option><option value="no">关闭</option></select></label>
               <label>允许离线查看历史<select id="cloud-cache"><option value="yes">开启，保留少量缓存</option><option value="no">关闭，仅在线读取</option></select></label>
             </div>
-            <div class="wifi-editor"><h3>Wi-Fi 连接顺序</h3><div id="cloud-networks"></div><button type="button" id="wifi-add">＋ 添加网络</button><p class="setup-caption">从上往下连接；每轮失败从第一套重试，最多 3 轮。成功即停止，不切换已连接网络。“可连接／失败”为模拟结果，不是真实网络检测。</p></div>
+            <div class="wifi-editor"><h3>Wi-Fi 连接顺序</h3><div id="cloud-networks"></div><button type="button" id="wifi-add">＋ 添加网络</button><p class="setup-caption">“可连接／失败”用于模拟网络是否可用。</p></div>
             <button type="submit">保存到 PA（模拟）</button></fieldset>
-            <p class="setup-caption">保存后在 PP 菜单选择“重载配置”；网络配置变更会在空闲点重新连接。请使用模拟名称和密码。</p>
+            <p class="setup-caption">保存后，在 PP 的「网络与配对 → PA 与维护」中选择「同步 PA 设置」。网络设置变更会在空闲时重新连接。请使用模拟名称和密码。</p>
             <p class="setup-caption">简短播报只读完整句，余下查看文字；完整播报也可按 OK 结束。缓存容量、播报阈值及其他范围均为交互演示参考，最终以实际硬件测量与支持能力为准。</p>
           </form>
-            <div class="compact-actions"><button type="button" id="cloud-reload">模拟设备重载配置</button><button type="button" id="setup-revoke">撤销配对</button></div>
+            <div class="compact-actions"><button type="button" id="cloud-reload">模拟同步 PA 设置</button><button type="button" id="setup-revoke">撤销配对</button></div>
           </details>
         </section>
         <section id="panel-debug" class="panel-body" hidden>
@@ -112,7 +113,6 @@
           <label class="clock-option"><input id="clock-synced" type="checkbox" checked>时间已同步</label>
 
           </details>
-          <details class="subpanel"><summary>Wi-Fi 尝试记录</summary><ol id="wifi-attempts"></ol></details>
           <details class="subpanel" id="interaction-record"><summary>事件记录 <span id="event-count">0 步</span></summary><ol id="event-log"></ol></details>
         </section>
         <section id="panel-lab" class="panel-body" hidden>

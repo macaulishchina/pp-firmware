@@ -12,11 +12,14 @@ export class PassportModel {
     if (!Object.keys(catalog).length) throw new TypeError('A scenario catalog is required');
     this.catalog = catalog;
     this.profile = profile;
-    this.textSize = 16; this.brightness = 65; this.showImages = true;
+    this.textSize = 16; this.showImages = true;
+    this.brightness = Number.isInteger(preferences.brightness)
+      ? Math.max(40, Math.min(100, preferences.brightness)) : 65;
     this.paginate = value => paginate(value, this.textSize);
     this.mode = preferences.mode === 'queue' ? 'queue' : 'steer';
     this.volume = Number.isInteger(preferences.volume) ? Math.max(0, Math.min(100, preferences.volume)) : 45;
     this.keepOnline = preferences.keepOnline === true;
+    this.standbyWifi = preferences.standbyWifi !== false;
     this.autoSpeak = true; this.speechLimit = profile.simulation.automaticSpeechCharacters;
     this.voiceRate = 1; this.sleepSeconds = profile.idleSleepMs / 1000;
     this.scenario = Object.keys(catalog)[0];
@@ -43,6 +46,7 @@ export class PassportModel {
     this.newReply = false;
     this.page = 0;
     this.menuIndex = 0;
+    this.menuHadCancel = false;
     this.menuFocus = new Map();
     this.noticeIndex = 0;
     this.activeNotice = null;
@@ -89,31 +93,54 @@ export class PassportModel {
     return this.paginate(this.reviewDraft?.prompt || '');
   }
 
+  get menuOpen() { return ['menu', 'sound', 'connectivity', 'power', 'maintenance'].includes(this.view); }
+  get canCancelExecution() { return this.online && ['processing', 'responding', 'clarifying'].includes(this.work); }
+
   get menus() {
-    if (this.view === 'settings') return [
-      { id: 'keep', label: '保持在线', value: this.keepOnline ? '开' : '关' },
-      { id: 'status', label: '网络状态', value: this.online ? '在线' : '离线' },
-      { id: 'sleep', label: '休眠', value: '' },
-      { id: 'maintenance', label: '设备维护', value: '' },
-      { id: 'back', label: '返回上级', value: '' },
+    const back = { id: 'back', label: '返回上级' };
+    if (this.view === 'sound') return [
+      { id: 'volume', label: '音量', value: `${this.volume}%` },
+      { id: 'brightness', label: '屏幕亮度', value: `${this.brightness}%` },
+      back,
+    ];
+    if (this.view === 'connectivity') return [
+      { id: 'status', label: '网络状态' },
+      { id: 'retry', label: '重试连接', detail: '用已存 Wi-Fi 连接 PA' },
+      { id: 'reconfigure', label: '设置 Wi-Fi', detail: '开启热点，手机填写网络' },
+      { id: 'maintenance', label: 'PA 与维护' },
+      back,
+    ];
+    if (this.view === 'power') return [
+      { id: 'keep', label: '自动休眠', value: this.keepOnline ? '关' : '开' },
+      { id: 'standby-wifi', label: '熄屏保持 Wi-Fi', value: this.standbyWifi ? '开' : '关' },
+      { id: 'sleep', label: '立即休眠' },
+      back,
     ];
     if (this.view === 'maintenance') return [
-      { id: 'reload', label: '重载配置', value: '' },
-      { id: 'retry', label: '重试连接', value: '' },
-      { id: 'reconfigure', label: '重新配网', value: '' },
-      { id: 'repair', label: '重新配对', value: '' },
-      { id: 'factory', label: '恢复出厂', value: '' },
-      { id: 'back', label: '返回上级', value: '' },
+      { id: 'reload', label: '同步 PA 设置', detail: '从 PA 获取设备设置' },
+      { id: 'repair', label: '更换 PA 配对', detail: '保留 Wi-Fi，绑定新会话' },
+      { id: 'factory', label: '恢复出厂设置', detail: '清除本机网络与配对' },
+      back,
     ];
     return [
-      { id: 'notices', label: '任务消息', value: String(this.notices.filter(n => !n.read).length) },
-      { id: 'volume', label: '音量', value: `${this.volume}%` },
-      { id: 'cancel', label: '取消当前执行', value: ['processing', 'responding'].includes(this.work) ? '' : '无前台执行' },
-      { id: 'settings', label: '设置', value: '' },
-      { id: 'home', label: '返回主页', value: '' },
+      { id: 'notices', label: '任务消息' },
+      { id: 'sound', label: '声音与屏幕' },
+      { id: 'connectivity', label: '网络与配对' },
+      { id: 'power', label: '电源与待机' },
+      ...(this.canCancelExecution ? [{ id: 'cancel', label: '取消当前执行' }] : []),
+      { id: 'home', label: '返回主页' },
     ];
   }
+  syncMenuExecution() {
+    const canCancel = this.canCancelExecution;
+    if (canCancel === this.menuHadCancel) return;
+    const home = canCancel ? 5 : 4;
+    if (this.menuFocus.get('menu') >= 4) this.menuFocus.set('menu', home);
+    if (this.view === 'menu' && this.menuIndex >= 4) this.menuIndex = home;
+    this.menuHadCancel = canCancel;
+  }
   openView(view, restore = false) {
+    this.syncMenuExecution();
     this.menuFocus.set(this.view, this.menuIndex);
     this.view = view;
     this.menuIndex = restore ? this.menuFocus.get(view) ?? 0 : 0;
@@ -271,12 +298,15 @@ export class PassportModel {
       const segment = complete?.[0] || (final ? remaining : '');
       if (!segment) break;
       const length = Array.from(segment).length;
-      if (this.speech.offered + length > this.speech.limit) {
+      const available = this.speech.limit - this.speech.offered;
+      if (length > available && !final) break;
+      const spoken = Array.from(segment).slice(0, available).join('').trim();
+      this.speech.offered += Math.min(available, length);
+      if (/[\p{L}\p{N}]/u.test(spoken)) this.speech.segments.push(spoken);
+      if (length > available) {
         this.speech.limited = true;
         break;
       }
-      this.speech.offered += length;
-      if (segment.trim()) this.speech.segments.push(segment);
     }
   }
   advanceSpeech(seconds) {
@@ -330,6 +360,8 @@ export class PassportModel {
   sleep() {
     this.discardInput('主动休眠，未提交的录音已丢弃'); this.stopPlayback();
     this.sleeping = true; this.view = 'home';
+    if (this.standbyWifi) this.network(false);
+    else this.setWifi({ connected: false });
     this.log('设备休眠，后台任务保留');
   }
   wake() {

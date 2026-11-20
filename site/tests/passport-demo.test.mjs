@@ -36,7 +36,11 @@ test('home does not cancel accepted work; streamed delivery cannot replace the h
   assert.equal(m.phase, 'idle');
   assert.ok(m.lastHistoryId);
   assert.equal(m.playing, false);
-  m.sleep(); m.wake();
+  m.sleep();
+  assert.equal(m.phase, 'sleeping');
+  assert.equal(m.wifi.connected, true);
+  assert.equal(m.online, false);
+  m.wake(); m.network(true);
   assert.equal(m.phase, 'idle');
 });
 
@@ -50,29 +54,39 @@ test('empty input keeps the mascot, has one actionable hint and dispatches nothi
   assert.ok(submit(m));
 });
 
-test('menus stay bounded and maintenance is explicitly below settings', () => {
-  const m = new PassportModel();
-  m.view = 'menu'; assert.equal(m.menus.length, 5);
-  assert.ok(!m.menus.some(item => item.id === 'factory' || item.id === 'reload'));
-  m.view = 'settings'; assert.equal(m.menus.length, 5);
-  assert.ok(m.menus.some(item => item.id === 'maintenance'));
-  m.view = 'maintenance'; assert.equal(m.menus.length, 6);
-  assert.ok(m.menus.some(item => item.id === 'back'));
-});
-
-test('returning from a detail restores the parent selection', () => {
+test('the operation menu groups settings and only shows cancellation for active work', () => {
   const m = new PassportModel();
   m.openView('menu');
-  m.menuIndex = 3;
-  m.openView('settings');
+  assert.deepEqual(m.menus.map(item => item.id), ['notices', 'sound', 'connectivity', 'power', 'home']);
+  assert.equal(m.menus[m.menuIndex].id, 'notices');
+  m.menuIndex = 4;
+  m.work = 'processing'; m.syncMenuExecution();
+  assert.equal(m.menus[m.menuIndex].id, 'home');
+  assert.equal(m.menus[4].id, 'cancel');
+  m.menuIndex = 4; m.work = 'idle'; m.syncMenuExecution();
+  assert.equal(m.menus[m.menuIndex].id, 'home');
+  m.openView('power');
+  assert.equal(m.menus.find(item => item.id === 'standby-wifi').value, '开');
+  m.openView('maintenance');
+  assert.deepEqual(m.menus.map(item => item.id), ['reload', 'repair', 'factory', 'back']);
+  assert.equal(m.menus[0].detail, '从 PA 获取设备设置');
+});
+
+test('returning from a detail restores the parent selection and entering the menu resets it', () => {
+  const m = new PassportModel({brightness: 70});
+  m.openView('menu');
   m.menuIndex = 1;
-  m.openView('status');
-  m.openView('settings', true);
-  assert.equal(m.menus[m.menuIndex].id, 'status');
+  m.openView('sound');
+  m.menuIndex = 1;
+  m.openView('brightness');
+  m.openView('sound', true);
+  assert.equal(m.menus[m.menuIndex].id, 'brightness');
+  assert.equal(m.menus[m.menuIndex].value, '70%');
   m.openView('menu', true);
-  assert.equal(m.menus[m.menuIndex].id, 'settings');
-  m.openView('settings');
-  assert.equal(m.menus[m.menuIndex].id, 'keep');
+  assert.equal(m.menus[m.menuIndex].id, 'sound');
+  m.home();
+  m.openView('menu');
+  assert.equal(m.menus[m.menuIndex].id, 'notices');
 });
 
 test('failed recognition dispatches nothing and allows fresh recording', () => {
@@ -160,6 +174,10 @@ test('pages retain all text; menu completion does not start hidden audio', () =>
 test('preferences are bounded and transcript/credentials are never stored in model preferences', () => {
   const m = new PassportModel({volume:999,mode:'invalid',keepOnline:false});
   assert.equal(m.volume,100); assert.equal(m.mode,'steer'); assert.equal(m.keepOnline,false);
+  const deep = new PassportModel({standbyWifi:false});
+  deep.sleep();
+  assert.equal(deep.wifi.connected, false);
+  assert.equal(deep.online, false);
 });
 
 test('new scenario uses the same shell-independent engine without a central id branch', () => {

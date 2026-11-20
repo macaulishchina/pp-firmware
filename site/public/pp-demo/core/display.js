@@ -1,8 +1,10 @@
 // Display coordinates and palette mirror PA-Terminal's ui.c.
 const WIDTH = 240, HEIGHT = 320, TEXT_WIDTH = 216;
+const batteryX = 200, batteryY = 9, batteryWidth = 25, batteryHeight = 13;
+const wifiPulse = ['#526158', '#839278', '#b6cfa4', '#839278'];
 const colors = {
   screen: '#172923', text: '#e6eddf', rule: '#34443c', origin: '#b6cfa4',
-  state: '#9aaa99', footer: '#b3bfb0', task: '#a7c7e8', battery: '#a8b8a6',
+  state: '#9aaa99', footer: '#b3bfb0', task: '#a7c7e8',
 };
 
 function loadImage(url) {
@@ -55,7 +57,9 @@ export async function mountDisplay(canvas) {
   const started = performance.now();
   let frame, level = 0;
 
-  function label(value, x, y, w, h, { color = colors.text, font = fonts[16], center = false, dots = false } = {}) {
+  function label(value, x, y, w, h, {
+    color = colors.text, font = fonts[16], center = false, dots = false,
+  } = {}) {
     if (!value) return;
     let rows = lines(value, font, w);
     if (dots && rows.length > 1) {
@@ -98,6 +102,35 @@ export async function mountDisplay(canvas) {
     context.fill();
   }
 
+  function batteryIcon(level) {
+    const percent = Number.isFinite(level) && level >= 0 ? Math.min(100, Math.trunc(level)) : -1;
+    const filled = percent > 0 ? Math.max(1, Math.floor(percent * batteryWidth / 100)) : 0;
+    const value = percent < 0 ? '--' : String(percent);
+    const font = fonts.battery;
+    const numberY = batteryY + Math.floor((batteryHeight - font.height) / 2);
+    rect(batteryX + batteryWidth + 1, batteryY + 4, 2, 5, '#718479', 1);
+    rect(batteryX, batteryY, batteryWidth, batteryHeight, '#46594f', 3);
+    if (filled) {
+      context.save();
+      context.beginPath();
+      context.rect(batteryX, batteryY, filled, batteryHeight);
+      context.clip();
+      rect(batteryX, batteryY, batteryWidth, batteryHeight, percent <= 20 ? '#ed817a' : '#dce8da', 3);
+      label(value, batteryX, numberY, batteryWidth, font.height,
+        { font, center: true, color: colors.screen });
+      context.restore();
+    }
+    if (filled < batteryWidth) {
+      context.save();
+      context.beginPath();
+      context.rect(batteryX + filled, batteryY, batteryWidth - filled, batteryHeight);
+      context.clip();
+      label(value, batteryX, numberY, batteryWidth, font.height,
+        { font, center: true, color: percent === 0 ? '#ffc4be' : '#f1f5ed' });
+      context.restore();
+    }
+  }
+
   function thumbnail(source) {
     if (!thumbnails.has(source)) {
       thumbnails.set(source, null);
@@ -116,19 +149,18 @@ export async function mountDisplay(canvas) {
   function paint() {
     if (!frame) return;
     const { view, state, hint, origin, body, volume, clock, battery, rssi, queue, task,
-      choices, selection, volumeFeedback, elapsed, signal, brightness, textSize, follow, image } = frame;
+      choices, selection, menuDetail, volumeFeedback, elapsed, signal, brightness, textSize, follow, image,
+      awaitingReply, wifiSearching, menuGrid } = frame;
     rect(0, 0, WIDTH, HEIGHT, view === 'sleep' ? '#000' : colors.screen);
     if (view === 'sleep') return;
     const symbol = (code, x, y, w, h, color, center = false) =>
       label(String.fromCodePoint(code), x, y, w, h, { font: fonts.symbols, color, center });
     label(clock, 12, 6, 65, 21);
     symbol(volume === 0 ? 0xf026 : volume < 55 ? 0xf027 : 0xf028, 144, 8, 20, 17, colors.text);
-    symbol(0xf1eb, 172, 8, 20, 17, rssi > -70 ? colors.origin : rssi > -90 ? '#839278' : '#526158');
-    context.beginPath();
-    context.roundRect(198.5, 6.5, 28, 17, 2);
-    context.strokeStyle = colors.battery;
-    context.stroke();
-    label(battery, 199, 6, 27, 18, { font: fonts.symbols, center: true });
+    const wifiColor = wifiSearching ? wifiPulse[Math.floor(performance.now() / 240) % wifiPulse.length]
+      : rssi > -70 ? colors.origin : rssi > -90 ? '#839278' : '#526158';
+    symbol(0xf1eb, 172, 8, 20, 17, wifiColor);
+    batteryIcon(battery);
     rect(12, 29, 216, 1, colors.rule);
     rect(12, 288, 216, 1, colors.rule);
 
@@ -149,9 +181,21 @@ export async function mountDisplay(canvas) {
     if (view === 'menu') {
       const first = Math.max(0, selection - 6);
       choices.slice(first, first + 7).forEach((choice, i) => {
-        if (first + i === selection) rect(18, 61 + i * 29, 204, 26, task ? '#263c47' : '#2a3c31', 4);
-        label(choice, 24, 64 + i * 29, 198, 23, { dots: true });
+        const selected = first + i === selection;
+        const tile = menuGrid && i < 4;
+        const x = tile ? 18 + i % 2 * 106 : 18;
+        const y = tile ? 66 + Math.floor(i / 2) * 66 : menuGrid ? 198 + (i - 4) * 29 : 61 + i * 29;
+        const w = tile ? 98 : 204;
+        if (tile || selected) rect(x, y, w, tile ? 58 : 26,
+          task ? '#263c47' : menuGrid ? selected ? '#355843' : '#233c30' : '#2a3c31', 4);
+        label(choice, x + 6, y + (tile ? 18 : 3), w - (tile ? 12 : 6), 23, { dots: true, center: menuGrid });
       });
+      if (menuDetail) label(menuDetail, 18, 222, TEXT_WIDTH, 28,
+        { font: fonts[textSize === 18 ? 18 : 16], color: colors.state });
+    } else if (view === 'brightness') {
+      label(body, 12, 111, TEXT_WIDTH, 33, { font: fonts[18], center: true });
+      rect(36, 170, 168, 6, colors.rule, 2);
+      if (brightness > 40) rect(36, 170, Math.floor((brightness - 40) * 168 / 60), 6, colors.origin, 2);
     } else if (view === 'image' && image) thumbnail(image.src);
     else if (view !== 'idle') {
       const font = fonts[textSize === 18 ? 18 : 16];
@@ -166,14 +210,19 @@ export async function mountDisplay(canvas) {
     if (volumeFeedback) {
       rect(108, 274, 120, 4, colors.rule, 2);
       if (volume) rect(108, 274, Math.floor(volume * 120 / 100), 4, colors.origin, 2);
+    } else if (awaitingReply) {
+      const activeDot = Math.floor(performance.now() / 240) % 3;
+      for (let i = 0; i < 3; i++)
+        rect(86 + i * 9, 273, 4, 4, i === activeDot ? colors.origin : '#526158', 2);
     }
     label(hint, 12, 294, 196, 22, { color: colors.footer });
     symbol(queue ? 0xf00b : 0xf8a2, 212, 297, 18, 17, colors.text);
-    if (brightness !== 65) rect(0, 0, WIDTH, HEIGHT, `rgba(0,0,0,${Math.max(0, (65 - brightness) / 110)})`);
+    if (brightness < 65) rect(0, 0, WIDTH, HEIGHT, `rgba(0,0,0,${(65 - brightness) / 110})`);
+    if (brightness > 65) rect(0, 0, WIDTH, HEIGHT, `rgba(255,255,255,${(brightness - 65) / 230})`);
   }
 
-  // Repaint the native blink frames while the avatar is visible.
-  setInterval(() => { if (frame && ['idle', 'input'].includes(frame.view)) paint(); }, 60);
+  // Repaint only while the avatar or Wi-Fi indicator is animated.
+  setInterval(() => { if (frame && (frame.wifiSearching || ['idle', 'input'].includes(frame.view))) paint(); }, 60);
   return {
     render(next) { frame = next; paint(); },
     pages(text, size) {

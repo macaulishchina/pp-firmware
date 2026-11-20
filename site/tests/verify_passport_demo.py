@@ -113,15 +113,71 @@ async def verify(url, synthetic_report=False):
         await expect(screen).to_have_attribute("data-mode", "queue")
         await ok.click()
         await phase("menu")
-        await expect(content).to_contain_text("任务消息\n音量\n取消当前执行\n设置\n返回主页")
+        await expect(screen).to_have_attribute("data-menu-layout", "grid")
+        await expect(screen).to_have_attribute("data-selected", "任务消息")
+        await expect(content).to_contain_text("任务消息\n声音与屏幕\n网络与配对\n电源与待机\n返回主页")
         await down.click()
         await ok.click()
+        await phase("sound")
+        await expect(screen).to_have_attribute("data-menu-layout", "list")
+        await next_ok()
         await phase("volume")
         await expect(content).to_contain_text("音量 45")
+        await next_ok()
+        await phase("sound")
+        await down.click()
+        await ok.click()
+        await phase("brightness")
+        await expect(content).to_contain_text("65%")
+        await down.click()
+        await expect(content).to_contain_text("60%")
+        await home()
+        await ok.click()
+        await phase("menu")
+        await expect(screen).to_have_attribute("data-selected", "任务消息")
+        await down.click()
+        await ok.click()
+        await phase("sound")
+        await expect(content).to_contain_text("屏幕亮度 · 65%")
+        await down.click()
+        await ok.click()
+        await phase("brightness")
+        await down.click()
+        await next_ok()
+        await phase("sound")
+        await expect(screen).to_have_attribute("data-selected", "屏幕亮度 · 60%")
+        await page.reload()
+        await phase("idle")
+        await ok.click()
+        await phase("menu")
+        await down.click()
+        await ok.click()
+        await phase("sound")
+        await expect(content).to_contain_text("屏幕亮度 · 60%")
+        await down.click()
+        await ok.click()
+        await phase("brightness")
+        await up.click()
+        await next_ok()
+        await phase("sound")
+        await expect(screen).to_have_attribute("data-selected", "屏幕亮度 · 65%")
         await home()
 
         await hold()
         await phase("processing")
+        await expect(content).to_contain_text("等待回复")
+        active_dot = """() => {
+          const ctx = document.getElementById('display').getContext('2d');
+          return [88, 97, 106].findIndex(x => ctx.getImageData(x, 275, 1, 1).data[0] === 182);
+        }"""
+        first_dot = await page.evaluate(active_dot)
+        assert first_dot >= 0
+        await page.wait_for_function(f"""first => {{
+          const current = ({active_dot})();
+          return current >= 0 && current !== first;
+        }}""", arg=first_dot, timeout=1200)
+        await phase("responding")
+        assert await page.evaluate(active_dot) == -1
         await expect(screen).to_have_attribute("data-playing", "true", timeout=10000)
         await up.click()
         await expect(content).to_contain_text("音量 50")
@@ -141,11 +197,29 @@ async def verify(url, synthetic_report=False):
         await up.click()
         await phase("history")
         await expect(content).to_contain_text("本地缓存")
+        await up.click()
+        await expect(content).to_contain_text("今天适合出去散步吗？")
+        await page.keyboard.down("ArrowDown")
+        await expect(content).to_contain_text("当然可以")
+        await page.keyboard.up("ArrowDown")
+        await phase("history")
+        await expect(content).to_contain_text("本地缓存")
         await home("offline")
         await ok.hover()
         await page.mouse.down()
         await phase("wifi-trying")
         await page.mouse.up()
+        await expect(content).not_to_contain_text("Wi-Fi")
+        await expect(page.locator("#stage-status")).to_be_empty()
+        wifi_brightness = """() => {
+          const ctx = document.getElementById('display').getContext('2d');
+          return Math.max(...ctx.getImageData(172, 8, 20, 17).data.filter((_, i) => i % 4 === 0));
+        }"""
+        initial_wifi = await page.evaluate(wifi_brightness)
+        await page.wait_for_function(f"""initial =>
+          document.getElementById('screen').dataset.phase === 'wifi-trying' &&
+          ({wifi_brightness})() !== initial
+        """, arg=initial_wifi, timeout=700)
         await expect(page.locator("#network-toggle")).to_have_text("断开 Wi-Fi")
         await phase("idle")
 
@@ -160,6 +234,17 @@ async def verify(url, synthetic_report=False):
         await expect(content).to_contain_text("160 × 96 合成色卡")
         await up.click()
         await expect(screen).to_have_attribute("data-view", "reply")
+        await up.click()
+        await phase("history")
+        await expect(content).to_contain_text("显示一张测试图片")
+        await up.click()
+        await expect(content).to_contain_text("当然可以")
+        await down.hover()
+        await page.mouse.down()
+        await expect(content).to_contain_text("这是一张合成色卡")
+        await page.mouse.up()
+        await expect(screen).to_have_attribute("data-view", "reply")
+        await expect(content).to_contain_text("这是一张合成色卡")
 
         await page.locator("#scenario-picker").select_option("long-input")
         await ok.hover()
@@ -198,19 +283,37 @@ async def verify(url, synthetic_report=False):
         await phase("notices")
         await home()
 
+        async def select_from_start(index):
+            for _ in range(index):
+                await down.click()
+            await next_ok()
+
+        async def open_connectivity():
+            await next_ok()
+            await phase("menu")
+            await expect(screen).to_have_attribute("data-selected", "任务消息")
+            await select_from_start(2)
+            await phase("connectivity")
+
+        async def open_maintenance():
+            await open_connectivity()
+            await select_from_start(3)
+            await phase("maintenance")
+
         await open_panel("setup")
         await page.locator("#setup-first").click()
         await phase("hotspot")
         await expect(content).to_contain_text("http://192.168.4.1")
         await ok.dblclick()
-        await phase("settings")
-        await expect(content).to_contain_text("保持在线 · 关")
-        await down.click()
-        await ok.click()
+        await phase("menu")
+        await expect(screen).to_have_attribute("data-selected", "任务消息")
+        await select_from_start(2)
+        await phase("connectivity")
+        await next_ok()
         await phase("status")
         await expect(content).to_contain_text("信号 未连接")
         await next_ok()
-        await phase("settings")
+        await phase("connectivity")
         await next_ok()
         await phase("status")
         await home("hotspot")
@@ -220,28 +323,19 @@ async def verify(url, synthetic_report=False):
         await page.locator("#setup-fail").check()
         await page.locator("#setup-connect").click()
         await phase("unreachable")
-        async def select_from_start(index):
-            for _ in range(index):
-                await down.click()
-            await ok.click()
 
-        async def open_maintenance():
-            await next_ok()
-            await phase("settings")
-            await select_from_start(3)
-            await phase("maintenance")
-
-        await open_maintenance()
+        await open_connectivity()
+        await expect(content).not_to_contain_text("恢复出厂设置")
         await select_from_start(2)
         await phase("device-reset")
-        await expect(content).to_contain_text("重新配网？")
+        await expect(content).to_contain_text("设置 Wi-Fi？")
         await next_ok()
-        await phase("maintenance")
+        await phase("connectivity")
         await home("unreachable")
-        await open_maintenance()
+        await open_connectivity()
         await select_from_start(2)
         await down.click()
-        await ok.click()
+        await next_ok()
         await phase("hotspot")
         await page.locator("#setup-fail").uncheck()
         await page.locator("#setup-connect").click()
@@ -253,6 +347,20 @@ async def verify(url, synthetic_report=False):
         await page.locator("#setup-code").fill(code)
         await page.locator("#setup-bind").click()
         await phase("idle")
+        await next_ok()
+        await phase("menu")
+        await select_from_start(3)
+        await phase("power")
+        await expect(content).to_contain_text("熄屏保持 Wi-Fi · 开")
+        await select_from_start(2)
+        await phase("sleeping")
+        await open_panel("debug")
+        await expect(page.locator("#network-toggle")).to_have_text("断开 Wi-Fi")
+        await expect(page.locator("#pa-state")).to_have_value("offline")
+        await ok.click()
+        await phase("idle")
+        await expect(page.locator("#pa-state")).to_have_value("online")
+        await open_panel("setup")
         await expect(page.locator("#cloud-settings")).to_be_visible()
         assert not await page.locator("#cloud-settings").evaluate("e => e.open")
         await page.locator("#cloud-settings > summary").click()
@@ -262,26 +370,61 @@ async def verify(url, synthetic_report=False):
         await phase("device-reset")
         await ok.click()
         await phase("revoked")
-        await open_maintenance()
+        await open_connectivity()
         await select_from_start(1)
         await phase("revoked")
         await open_maintenance()
-        await select_from_start(3)
+        await expect(content).to_contain_text("同步 PA 设置")
+        await expect(content).to_contain_text("从 PA 获取设备设置")
+        await expect(content).to_contain_text("更换 PA 配对")
+        await expect(content).to_contain_text("恢复出厂设置")
+        await select_from_start(1)
         await phase("device-reset")
         await expect(content).to_contain_text("保留 Wi-Fi")
-        await next_ok()  # Cancel leaves the old identity and current selection intact.
+        await next_ok()  # Cancel returns to the same row.
         await phase("maintenance")
+        await expect(screen).to_have_attribute("data-selected", "更换 PA 配对")
         await next_ok()
         await down.click()
-        await ok.click()
+        await next_ok()
         await phase("pairing")
         code = (await content.text_content()).splitlines()[1]
-        await next_ok()
-        await phase("settings")
+        await open_connectivity()
         await page.locator("#setup-code").fill(code)
         await page.locator("#setup-bind").click()
-        await phase("settings")  # Successful handshake cannot take over a local page.
+        await phase("connectivity")  # Successful handshake preserves the local page.
         await home()
+
+        await open_panel("debug")
+        status = page.locator("#panel-debug").get_by_text("设备状态", exact=True)
+        slider = page.locator("#battery-level")
+        if not await slider.is_visible():
+            await status.click()
+        display = page.locator("#display")
+
+        async def battery_pixel(x, y):
+            return await display.evaluate("""(canvas, [x, y]) =>
+                [...canvas.getContext('2d').getImageData(x,y,1,1).data].slice(0,3)""", [x, y])
+
+        await slider.fill("100")
+        assert await battery_pixel(220, 10) == [220, 232, 218]
+        assert await battery_pixel(226, 15) == [113, 132, 121]
+        assert await battery_pixel(225, 15) == [23, 41, 35]
+        # Read the actual rendered digits between the rounded ends of the battery.
+        assert await display.evaluate("""canvas => {
+            const { data, width, height } = canvas.getContext('2d').getImageData(203, 9, 19, 13);
+            const rows = Array.from({ length: height }, (_, y) => y).filter(y =>
+                Array.from({ length: width }, (_, x) => x).some(x => data[4 * (y * width + x)] < 130));
+            return rows.length === 9 && rows[0] === 2 && rows.at(-1) === 10;
+        }""")
+        await slider.fill("50")
+        assert await battery_pixel(211, 10) == [220, 232, 218]
+        assert await battery_pixel(212, 10) == [70, 89, 79]
+        await slider.fill("12")
+        assert await battery_pixel(201, 15) == [237, 129, 122]
+        await slider.fill("0")
+        assert await battery_pixel(201, 15) == [70, 89, 79]
+        await slider.fill("85")
         await open_panel("lab")
         await expect(page.locator("#lab-meta")).to_contain_text("0.2.1-preview.1" if synthetic_report else "·")
         await expect(page.locator("#lab-cases")).to_contain_text("真实收音与播报")
