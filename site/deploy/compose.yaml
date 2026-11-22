@@ -18,9 +18,12 @@ services:
       - ../../runtime/passportsim-service:/run/pp-sim:ro
       - ../config:/srv/catalog:ro
       - ../../releases:/srv/releases:ro
-      - ../../private/tls/server.crt:/etc/nginx/tls/server.crt:ro
-      - ../../private/tls/server-key.pem:/etc/nginx/tls/server-key.pem:ro
-      - ../../private/tls/ca.crt:/srv/ca/pp-firmware-ca.crt:ro
+      - type: bind
+        source: ${SITE_TLS_DIR:?Set SITE_TLS_DIR in deploy/.env or the shell}
+        target: /etc/nginx/tls
+        read_only: true
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:size=16m,mode=1777
     healthcheck:

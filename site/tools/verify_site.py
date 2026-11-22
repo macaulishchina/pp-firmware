@@ -3,6 +3,7 @@ import asyncio
 import argparse
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 import ssl
@@ -15,7 +16,8 @@ from playwright.async_api import async_playwright, expect
 
 ROOT=Path(__file__).resolve().parents[2]
 URL="https://110.0.0.82:9443"
-context=ssl.create_default_context(cafile=str(ROOT/"private/tls/ca.crt"))
+CA_FILE=Path(os.environ.get("SITE_TLS_DIR") or "~/.local/share/site-tls/live").expanduser()/"ca.pem"
+context=ssl.create_default_context(cafile=str(CA_FILE))
 def get(path):
     with urllib.request.urlopen(URL+path,context=context,timeout=20) as response:
         return response.read(),response.headers
@@ -42,7 +44,7 @@ def http_checks():
         try:get(path)
         except urllib.error.HTTPError as error:assert error.code==404,(path,error.code)
         else:raise AssertionError('Private source exposed: '+path)
-    assert get('/certs/pp-firmware-ca.crt')[0]==(ROOT/'private/tls/ca.crt').read_bytes()
+    assert get('/certs/pp-firmware-ca.crt')[0]==CA_FILE.read_bytes()
     return config['supported_apps']
 
 async def browser_checks(default_app):

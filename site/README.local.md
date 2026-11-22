@@ -33,7 +33,7 @@ PA-Terminal 公开目录默认提供正式版 0.2.1，也可选择之前的 0.2.
 ```sh
 npm ci
 npm run build
-bash tools/create_tls.sh
+printf 'SITE_TLS_DIR=%s\n' "$HOME/.local/share/site-tls/live" > deploy/.env
 mkdir -p ../runtime/passportsim ../runtime/passportsim-service
 docker compose -p pp-firmware -f deploy/compose.yaml run --rm --no-deps website -t
 docker compose -p pp-firmware -f deploy/compose.yaml up -d
@@ -44,8 +44,18 @@ docker compose -p pp-firmware -f deploy/compose.yaml up -d
 环境中，额外设置 no-new-privileges 会导致 nginx exec 被拒；已单独验证启动组合，未修改
 宿主全局安全配置。TLS 私钥需让 gid 101 可读；当前操作者属于该组。
 
-仅前端修改：`npm run build` 后刷新页面即可。部署配置或证书变化才重建该站点容器。
-首次或证书更新后，使用 `curl --cacert ../private/tls/ca.crt https://110.0.0.82:9443/healthz` 核对。
+仅前端修改时，执行 `npm run build` 后刷新页面。修改容器挂载时用 Compose 重建站点容器。
+
+Compose 通过 `deploy/.env` 或 shell 中的 `SITE_TLS_DIR` 只读挂载主机证书目录。Dell 使用
+`~/.local/share/site-tls/live` 的绝对路径。目录包含 `cert.pem`、`key.pem` 和公开 CA `ca.pem`。
+首次没有可复用的站点证书时，可在运行 Compose 之前执行 `bash tools/create_tls.sh` 创建。
+容器以 GID 101 读取目录和服务器私钥，CA 签名私钥保存在同级 `issuer/` 目录。
+自定义目录时，通过 `--release-profile` 选用包含对应 `ca_file` 的固件构建配置。
+
+续期时执行 `bash tools/create_tls.sh --renew`，然后在 `site/` 执行
+`docker compose -p pp-firmware -f deploy/compose.yaml exec website nginx -s reload`。
+同主机上的 GoldenNest 网关也 reload，PA 重启服务以载入证书。
+使用 `curl --cacert ~/.local/share/site-tls/live/ca.pem https://110.0.0.82:9443/healthz` 核对。
 
 `/pp-sim/` 读取 `../runtime/passportsim/`。首次安装可从已初始化的
 `../upstream/passportsim/` 构建。该子模块锁定上游提交，先在干净的子模块上应用本站维护的补丁：
@@ -85,15 +95,12 @@ PPDemo 系列直接按设备菜单使用。网站的浏览器刷写需要可信 
 
 ## Windows 信任本地 CA
 
-2026-11-07 起本站复制使用 GoldenNest 的服务器证书和公开 CA，证书涵盖公网
-`47.109.34.254` 与局域网 `110.0.0.82`，有效期至 2036-02-10。
-证书来自 `/home/macaulish/workspace/GoldenNest/ssl/{cert.pem,key.pem,ca.pem}`，分别复制至
-`../private/tls/{server.crt,server-key.pem,ca.crt}`。只复制服务器私钥，不复制 CA 签名私钥，
-不修改 GoldenNest 服务。副本不会自动同步；GoldenNest 续期后应重新复制这三个文件并重建本站容器。
+Dell 的固件站、GoldenNest 和 PA 引用同一份主机站点证书。证书涵盖公网 `47.109.34.254`
+及局域网 `110.0.0.82`，签发 CA 仍为 GoldenNest Local CA。
 
 电脑若已经信任 GoldenNest Local CA，无需再次导入。否则 Windows 浏览器需要信任公开 CA：
 
-1. 将 `../private/tls/ca.crt` 下载到自己的 Windows；只导出证书，不导出任何私钥。
+1. 从固件站的 `/certs/pp-firmware-ca.crt` 下载公开 CA 到自己的 Windows。
 2. 导入“当前用户 → 受信任的根证书颁发机构”。可双击证书安装，或在 PowerShell 执行：
 
 ```powershell
@@ -101,10 +108,6 @@ Import-Certificate -FilePath "$env:USERPROFILE\Downloads\pp-firmware-ca.crt" -Ce
 ```
 
 3. 用 Chrome 或 Edge 重新打开网址，确认没有证书警告，再连接 PP。
-
-证书仅供自己的电脑信任。`tools/create_tls.sh` 默认检查并保留已有证书；当前使用导入证书，
-不能用本站原有 CA 私钥重签，`--renew` 会明确拒绝不匹配的签名私钥。续期由 GoldenNest 管理，
-本站复制更新。若将来恢复独立 CA，需由操作者明确配置相匹配的 CA 与签名密钥。
 
 ## 保留设备数据升级
 

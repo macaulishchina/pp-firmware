@@ -87,7 +87,8 @@ class Lab:
         profile = args.release_profile.resolve()
         release = tomllib.loads(profile.read_text())
         self.release_url = release["server_url"]
-        self.release_ca = (profile.parent / release["ca_file"]).resolve() if release.get("ca_file") else None
+        ca_file = release.get("ca_file")
+        self.release_ca = (profile.parent / Path(ca_file).expanduser()).resolve() if ca_file else None
         self.release_profile = profile
         self.version = (self.app / "version.txt").read_text().strip()
         if not VERSION.fullmatch(self.version):
