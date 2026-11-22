@@ -1,6 +1,23 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.2.7-preview.1", "PA-Terminal · 0.2.6", "PA-Terminal · 0.2.5", "PA-Terminal · 0.2.1", "PA-Terminal · 0.2.1-preview.33", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.7-preview.2", "PA-Terminal · 0.2.7-preview.1", "PA-Terminal · 0.2.6", "PA-Terminal · 0.2.5", "PA-Terminal · 0.2.1", "PA-Terminal · 0.2.1-preview.33", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.7-preview.2"]
+description = "播报传输新增 24／16 kHz 采样率和 ADPCM 压缩开关。已通过软件检查与构建，真机弱网和音质待验收。"
+version = "0.2.7-preview.2"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.7-preview.2/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.7-preview.2/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "preview"
+readme.text = "/firmware/pa-terminal/0.2.7-preview.2/README.md"
+image.esp32-c3.upgrade_policy = "pp-data-v2"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.7-preview.2/bootloader.bin", "/firmware/pa-terminal/0.2.7-preview.2/partition-table.bin", "/firmware/pa-terminal/0.2.7-preview.2/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 3025120]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "5a73c1ed53106c1e01d41735da9ae2325defa2456e24c80390a69e6fa5ae2e72", "22d9e91a1d0d0a3495ff18ca6f0664a5f7bb62b59bdaacf82e82e74fd9080b4f"]
 
 ["PA-Terminal · 0.2.7-preview.1"]
 description = "修复多图连续到达时离线预览丢失和高清图显示不完整。配套 PA 已部署，真机联网复测待完成。"
