@@ -1,6 +1,23 @@
 esp_toml_version = 1.0
 firmware_images_url = "/firmware/"
-supported_apps = ["PA-Terminal · 0.2.5", "PA-Terminal · 0.2.1", "PA-Terminal · 0.2.1-preview.33", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+supported_apps = ["PA-Terminal · 0.2.6", "PA-Terminal · 0.2.5", "PA-Terminal · 0.2.1", "PA-Terminal · 0.2.1-preview.33", "PPDemo · 0.2.0", "PPDemo-Zh · 0.2.0"]
+
+["PA-Terminal · 0.2.6"]
+description = "改善弱网录音提前截断，优先使用临时 Flash 缓存并按序补传。保留原配置，真机待验收。"
+version = "0.2.6"
+board = "FoloToy AI Passport"
+acceptance = "pending"
+download = "/firmware/pa-terminal/0.2.6/firmware.zip"
+manifest = "/firmware/pa-terminal/0.2.6/manifest.json"
+chipsets = ["ESP32-C3"]
+console_baudrate = 115200
+channel = "stable"
+readme.text = "/firmware/pa-terminal/0.2.6/README.md"
+image.esp32-c3.upgrade_policy = "pp-data-v2"
+image.esp32-c3.parts = ["/firmware/pa-terminal/0.2.6/bootloader.bin", "/firmware/pa-terminal/0.2.6/partition-table.bin", "/firmware/pa-terminal/0.2.6/pa_terminal.bin"]
+image.esp32-c3.addresses = ["0x0", "0x8000", "0x10000"]
+image.esp32-c3.sizes = [21024, 3072, 3023664]
+image.esp32-c3.sha256 = ["44a7bfb5d71acbf96367baac24610b7755b727c0e173f503e9e56ad4b379bc43", "5a73c1ed53106c1e01d41735da9ae2325defa2456e24c80390a69e6fa5ae2e72", "a88778eb1c6cbbddc954e88cda933a6fb0b8b30433515dadc3455fcb4094b9a9"]
 
 ["PA-Terminal · 0.2.5"]
 description = "修复长按 OK 录音时误报请求失败，优化播报缓冲恢复。保留 Wi-Fi、配对和历史记录，真机待验收。"
